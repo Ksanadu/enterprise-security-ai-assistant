@@ -1,0 +1,28 @@
+# Normalise line endings in the repository to LF.
+#
+# The deployment targets Linux containers, where a stray CR can change how a
+# directive is parsed (nginx.conf, Dockerfile) or break a script outright. Most
+# editors on Windows default to CRLF, so without this rule the repository would
+# contain a mix and nobody would notice until a container misbehaved.
+#
+# `text=auto` lets Git decide whether a file is text at all; `eol=lf` then fixes
+# the working tree to LF as well, so every platform checks out the same bytes.
+* text=auto eol=lf
+
+# Never normalise binary content.
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.webp binary
+*.woff binary
+*.woff2 binary
+*.pdf binary
+*.zip binary
+
+# PowerShell scripts are consumed by Windows PowerShell, which accepts LF.
+*.ps1 text eol=lf
+
+# Git's own files must keep their exact bytes.
+.gitattributes text eol=lf

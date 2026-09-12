@@ -1,0 +1,28 @@
+# Runtime dependencies for the Enterprise Security AI Assistant backend.
+# Pin with >= / < bounds so upgrades stay deliberate.
+
+# --- Web framework ---
+fastapi>=0.115,<0.116
+uvicorn[standard]>=0.32,<0.35
+python-multipart>=0.0.9,<0.1        # OAuth2 password form parsing
+pydantic>=2.9,<3
+pydantic-settings>=2.5,<3
+email-validator>=2.2,<3               # pydantic EmailStr support
+
+# --- Persistence ---
+SQLAlchemy>=2.0.35,<2.1
+
+# --- Security ---
+PyJWT>=2.9,<3
+bcrypt>=4.2,<5
+
+# --- HTTP client (LLM / embedding providers) ---
+httpx>=0.27,<0.29
+
+# --- Retrieval ---
+snowballstemmer>=2.2,<3               # Porter2 stemming for the offline vectorizer
+PyYAML>=6.0,<7                        # knowledge base front matter
+# Vector search. Optional at runtime: the app falls back to a NumPy-free
+# in-memory store when FAISS is unavailable.
+faiss-cpu>=1.8,<2; platform_python_implementation == "CPython"
+numpy>=1.26,<3

@@ -1,0 +1,22 @@
+# Build context exclusions for the frontend image.
+
+# --- dependencies are installed inside the image from the lockfile ---
+node_modules/
+
+# --- build output is produced inside the image ---
+dist/
+*.tsbuildinfo
+
+# --- local configuration and secrets ---
+.env
+.env.*
+!.env.example
+
+# --- development artefacts ---
+coverage/
+.vite/
+*.log
+npm-debug.log*
+
+Dockerfile
+.dockerignore

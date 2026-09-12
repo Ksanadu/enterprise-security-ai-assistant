@@ -1,0 +1,46 @@
+# Build context exclusions for the backend image.
+#
+# The rules that matter for security: the local environment file, the runtime
+# database and the vector index must never be baked into an image layer. An
+# image is pushed, shared and kept; a secret or a database file inside one
+# cannot be taken back.
+
+# --- secrets and local configuration ---
+# The environment template lives at the repository root, outside this build
+# context, so there is nothing to re-include here.
+.env
+.env.*
+*.pem
+*.key
+
+# --- runtime data (mounted as a volume instead) ---
+data/
+*.db
+*.db-journal
+*.sqlite
+*.sqlite3
+*.faiss
+*.index
+logs/
+*.log
+
+# --- development artefacts ---
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+coverage.xml
+htmlcov/
+evaluation.db
+
+# --- not part of the runtime image ---
+tests/
+scripts/
+requirements-dev.txt
+pytest.ini
+Dockerfile
+.dockerignore

@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="referrer" content="no-referrer" />
+    <!--
+      The Content-Security-Policy is injected at build time (see vite.config.ts).
+      It is not hardcoded here because the Vite dev server needs an inline
+      module script for hot reload, which a production-grade policy must block.
+    -->
+    <meta
+      name="description"
+      content="Enterprise Security AI Assistant - a simulated RAG assistant for enterprise security questions."
+    />
+    <title>Enterprise Security AI Assistant</title>
+  </head>
+  <body>
+    <div id="root"></div>
+    <noscript>This application requires JavaScript.</noscript>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

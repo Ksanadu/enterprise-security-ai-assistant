@@ -1,0 +1,60 @@
+# ---- Secrets / environment ----
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# ---- Python ----
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+dist/
+*.egg-info/
+.eggs/
+.venv/
+venv/
+env/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+coverage.xml
+
+# ---- Node / frontend ----
+node_modules/
+frontend/dist/
+frontend/.vite/
+*.tsbuildinfo
+npm-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# ---- Runtime data (SQLite DBs, vector index, logs) ----
+data/
+*.db
+*.db-journal
+*.sqlite
+*.sqlite3
+*.faiss
+*.index
+# A vector index is written wherever VECTOR_STORE_PATH points, which an
+# operator may change. Ignore the directory by name so a generated index can
+# never be committed, wherever it ends up.
+vector_store/
+logs/
+*.log
+
+# ---- Editor / OS ----
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# ---- Unrelated pre-existing local files (not part of this project) ----
+old/

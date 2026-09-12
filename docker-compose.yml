@@ -1,0 +1,123 @@
+# =============================================================================
+# Enterprise Security AI Assistant - single-host deployment
+# -----------------------------------------------------------------------------
+#     Copy-Item .env.example .env      (PowerShell)
+#     docker compose up --build
+#
+# Then open http://localhost:8080
+#
+# Two services:
+#   backend   FastAPI + SQLite + FAISS, not published to the network by default
+#   frontend  nginx serving the built SPA and reverse-proxying /api to backend
+#
+# The browser only ever talks to the frontend origin, so the production request
+# path has no CORS at all. The backend port is mapped to loopback so the API can
+# still be exercised directly with curl during verification.
+#
+# All data is simulated. No real enterprise data is shipped in this repository.
+# =============================================================================
+
+name: esaa
+
+services:
+  backend:
+    build:
+      context: ./backend
+    image: esaa-backend:local
+
+    # All application configuration comes from the environment file. It is read
+    # at run time and never baked into an image layer.
+    env_file:
+      - .env
+
+    # Container-specific overrides. The knowledge base is immutable and lives in
+    # the image; the database and the vector index live on the named volume so
+    # they survive `docker compose up --build`.
+    environment:
+      # Four slashes: "sqlite://" + absolute path /app/data/app.db
+      DATABASE_URL: sqlite:////app/data/app.db
+      VECTOR_STORE_PATH: /app/data/vector_store
+      KB_DIR: /app/knowledge_base
+      # The in-container API listens on all interfaces of its own namespace; it
+      # is unreachable from outside except through the loopback mapping below.
+      API_HOST: 0.0.0.0
+      # Direct browser access to the backend is only needed for local debugging
+      # on the mapped port, hence the loopback origins rather than a wildcard.
+      API_CORS_ORIGINS: ${ESAA_CORS_ORIGINS:-http://localhost:8080,http://127.0.0.1:8080,http://localhost:8000,http://127.0.0.1:8000}
+      # Exactly one proxy sits in front of the API (the nginx service below), so
+      # the real client address is the last entry of X-Forwarded-For.
+      #
+      # Leaving this at 0 would make every request look like it came from nginx:
+      # the per-address sign-in lockout would become one shared bucket that a
+      # single attacker could exhaust for everybody, and every audit row would
+      # record the proxy instead of the client.
+      TRUSTED_PROXY_COUNT: 1
+
+    volumes:
+      - app-data:/app/data
+
+    ports:
+      # Loopback only. Remove this mapping to keep the API reachable solely
+      # through the nginx proxy.
+      - "127.0.0.1:${ESAA_API_PORT:-8000}:8000"
+
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - >-
+          import sys, urllib.request;
+          sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8000/api/v1/health', timeout=4).getcode() == 200 else 1)
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      # The knowledge base is loaded and the vector index is fitted at start-up,
+      # which is not instantaneous.
+      start_period: 40s
+
+    restart: unless-stopped
+
+    # A compromised process cannot gain privileges it did not already have.
+    security_opt:
+      - no-new-privileges:true
+
+    # Optional hardening, disabled because it has not been verified end to end:
+    # the image is designed around a single writable mount (/app/data), so a
+    # read-only root filesystem plus a tmpfs for /tmp should work. Enable both
+    # lines below and re-run the smoke test before relying on it.
+    #   read_only: true
+    #   tmpfs: [/tmp]
+
+  frontend:
+    build:
+      context: ./frontend
+    image: esaa-frontend:local
+
+    ports:
+      - "${ESAA_HTTP_PORT:-8080}:80"
+
+    # The proxy target `backend` is a fixed service name, but waiting for the
+    # health check keeps the first page load from racing an unready API.
+    depends_on:
+      backend:
+        condition: service_healthy
+
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://127.0.0.1/"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+    restart: unless-stopped
+
+    security_opt:
+      - no-new-privileges:true
+
+volumes:
+  # Named volume rather than a bind mount: Docker owns the permissions, which
+  # matters because the backend runs as an unprivileged user (uid 10001) and a
+  # bind-mounted directory on the host would typically be owned by root.
+  app-data:
+    driver: local

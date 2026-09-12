@@ -1,0 +1,16 @@
+# Development / test dependencies (not needed in the production image).
+-r requirements.txt
+
+pytest>=8.3,<9
+pytest-asyncio>=0.24,<1
+pytest-cov>=6.0,<7
+coverage>=7.6,<8
+
+# --- Static analysis ---
+ruff>=0.7,<0.9
+mypy>=1.13,<2
+types-requests>=2.32
+
+# --- Type stubs / tooling ---
+typing-extensions>=4.12
+types-PyYAML>=6.0
