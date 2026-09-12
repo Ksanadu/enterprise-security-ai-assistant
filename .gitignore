@@ -36,6 +36,13 @@ pnpm-debug.log*
 
 # ---- Runtime data (SQLite DBs, vector index, logs) ----
 data/
+# ...except the evaluation set, which is a source fixture that happens to sit
+# under a directory called `data/`. Git cannot re-include a file whose parent
+# directory is excluded, so the directory is re-included first. Without this the
+# 40-question evaluation set is untracked and a fresh clone fails the whole
+# evaluation suite - which is exactly what happened.
+!backend/tests/data/
+!backend/tests/data/**
 *.db
 *.db-journal
 *.sqlite
