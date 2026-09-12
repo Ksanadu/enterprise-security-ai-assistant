@@ -26,6 +26,41 @@ TModel = TypeVar("TModel", bound=BaseModel)
 #: ```json ... ``` or ``` ... ``` fences around the payload.
 _FENCE = re.compile(r"```(?:json|JSON)?\s*(?P<body>.*?)```", re.DOTALL)
 
+#: Deepest bracket nesting accepted in a model response.
+#:
+#: This is not a style preference. `json.loads` decodes recursively, so a
+#: response containing a few thousand nested brackets raises `RecursionError` -
+#: which is a `RuntimeError`, not a `JSONDecodeError`, and therefore escapes every
+#: handler on this path and turns a bad model response into a failed request.
+#: Nothing this application asks a model for nests more than two or three levels,
+#: so the limit is generous and the check is a cheap character scan.
+MAX_JSON_DEPTH = 32
+
+
+def _nesting_exceeds(text: str, limit: int) -> bool:
+    """True when brackets nest deeper than ``limit``, ignoring brackets in strings."""
+    depth = 0
+    in_string = False
+    escaped = False
+    for char in text:
+        if in_string:
+            if escaped:
+                escaped = False
+            elif char == "\\":
+                escaped = True
+            elif char == '"':
+                in_string = False
+            continue
+        if char == '"':
+            in_string = True
+        elif char in "{[":
+            depth += 1
+            if depth > limit:
+                return True
+        elif char in "}]":
+            depth -= 1
+    return False
+
 
 def strip_code_fences(text: str) -> str:
     """Remove a Markdown code fence if the model wrapped its JSON in one."""
@@ -46,9 +81,20 @@ def extract_json_object(text: str) -> dict[str, Any] | None:
         return None
 
     candidate = strip_code_fences(text)
+
+    # Reject pathological nesting before handing the text to a recursive decoder.
+    if _nesting_exceeds(candidate, MAX_JSON_DEPTH):
+        logger.warning(
+            "structured_output_rejected reason=nesting_depth chars=%d", len(candidate)
+        )
+        return None
+
     try:
         parsed = json.loads(candidate)
-    except json.JSONDecodeError:
+    except (json.JSONDecodeError, RecursionError):
+        # RecursionError is included defensively: the depth check above should
+        # make it unreachable, and a decoder that still finds a way to recurse
+        # must not be able to fail the request.
         parsed = None
     if isinstance(parsed, dict):
         return parsed
@@ -80,7 +126,7 @@ def extract_json_object(text: str) -> dict[str, Any] | None:
                     block = candidate[start : index + 1]
                     try:
                         parsed = json.loads(block)
-                    except json.JSONDecodeError:
+                    except (json.JSONDecodeError, RecursionError):
                         break
                     if isinstance(parsed, dict):
                         return parsed
@@ -110,6 +156,10 @@ def parse_model(
     except ValidationError as exc:
         fields = [".".join(str(part) for part in error.get("loc", ())) for error in exc.errors()]
         logger.info("structured_output_invalid context=%s fields=%s", context, fields)
+        return None
+    except RecursionError:
+        # Belt and braces: validation also walks the structure recursively.
+        logger.warning("structured_output_invalid context=%s reason=depth", context)
         return None
 
 

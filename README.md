@@ -145,6 +145,22 @@ document's identifier, title or path.
   mandatory escalation. It offers no control that could change the assessment.
 * 666 backend tests + 32 frontend tests; `ruff`, `mypy`, `tsc` and `eslint` clean.
 
+**Structured output stability.** `tests/test_structured_output_stability.py` treats "stable" as
+four separate properties, because each fails differently: the payload is **deterministic** between
+identical requests, has the **same field set on every code path** (normal, blocked, ungrounded),
+keeps values inside their **declared domains** (closed enums, finite numbers, confidence in
+`[0,1]`, strict JSON with no `NaN`), and **cannot be reshaped by anything a model returns** -
+including 25 malformed/trailing/truncated/wrong-typed responses. Re-verifying this found one real
+defect:
+
+| Found | Fix |
+| ----- | --- |
+| A response with a few thousand nested brackets raised `RecursionError` from `json.loads`. That is a `RuntimeError`, **not** a `JSONDecodeError`, so it escaped both handlers on the parse path and turned a bad model response into a failed request - the opposite of what the module promises. | A depth limit (32) is checked with a cheap character scan before the recursive decoder sees the text, and both `json.loads` and `model_validate` now also tolerate `RecursionError` defensively. Deep nesting is now rejected like any other unparsable output, and the rule-based result stands. |
+
+Determinism is asserted over the whole payload rather than selected fields, so a newly added
+non-deterministic field fails the test instead of being quietly tolerated. Only `ticket_reference`
+is excluded, because it names a ticket that is genuinely allocated per incident.
+
 **Phase 6 - ticket workflow and human escalation**
 
 * **The assistant files tickets itself.** High or critical risk creates a ticket owned by the
@@ -210,9 +226,9 @@ document's identifier, title or path.
   dashboard, triage it, and check the audit trail - all through HTTP.
 * **Cross-role consistency**: the same question asked by all three roles must produce an
   identical classification and identical escalation, while retrieval differs and stays in scope.
-* **765 security-marked tests** covering RBAC, injection, leakage, session handling, ticket
+* **889 security-marked tests** covering RBAC, injection, leakage, session handling, ticket
   scoping, redaction and the deployment assets, runnable as one suite with `pytest -m security`.
-* 1135 backend tests, **94% statement coverage**; `ruff`, `mypy`, `tsc` and `eslint` clean.
+* 1259 backend tests, **94% statement coverage**; `ruff`, `mypy`, `tsc` and `eslint` clean.
 
 The set immediately earned its keep. Writing it exposed a set of real defects:
 
@@ -371,7 +387,7 @@ stale cached index). A mismatch is logged as a security event and the chunk is d
 │   ├── scripts/
 │   │   ├── demo.py               # the executable demonstration (67 checks)
 │   │   └── update_evaluation_expectations.py
-│   ├── tests/                    # 1135 tests
+│   ├── tests/                    # 1259 tests
 │   └── requirements*.txt
 ├── frontend/
 │   ├── Dockerfile                # Vite build stage → nginx runtime stage
@@ -676,12 +692,12 @@ The suite has three layers:
 
 | Layer | What it covers | How to run |
 | ----- | -------------- | ---------- |
-| Unit and integration (1135 tests) | Every module: config guards, ORM, RAG, classifiers, services, API, deployment assets | `pytest -q` |
-| Security (765 tests) | RBAC, injection, leakage, sessions, ticket scoping, redaction, deployment hardening | `pytest -m security` |
+| Unit and integration (1259 tests) | Every module: config guards, ORM, RAG, classifiers, services, API, deployment assets | `pytest -q` |
+| Security (889 tests) | RBAC, injection, leakage, sessions, ticket scoping, redaction, deployment hardening | `pytest -m security` |
 | Evaluation (61 tests) | The 40-question set and the end-to-end demo walkthrough | `pytest -m evaluation` |
 
 ```powershell
-# backend: 1135 tests, 94% statement coverage
+# backend: 1259 tests, 94% statement coverage
 cd backend
 .\.venv\Scripts\python.exe -m pytest -q
 .\.venv\Scripts\python.exe -m pytest -m security -q          # security subset

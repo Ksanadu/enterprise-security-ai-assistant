@@ -330,7 +330,7 @@ rather than from anything the model returned.
 | --- | --- |
 | Position | This implementation has **no tool-calling surface**. The model is used for two things only: producing answer text from retrieved context, and (optionally) refining a classification. It cannot invoke functions, run code, reach the network or write to the database. |
 | Consequence | The class of risk does not exist here. That is a deliberate scope decision, not an oversight: adding tools would require a separate authorization design for each tool, which this prototype does not need. |
-| Structured output | Even so, every model response is parsed defensively (`app/ai/structured.py`): the JSON object is extracted, validated against a pydantic model, and confidence is clamped to `[0, 1]` with a fallback to the rule-based result when parsing fails. |
+| Structured output | Even so, every model response is parsed defensively (`app/ai/structured.py`): the JSON object is extracted, validated against a pydantic model, and confidence is clamped to `[0, 1]` with a fallback to the rule-based result when parsing fails. A depth limit rejects pathological nesting before the recursive decoder sees it - `RecursionError` is a `RuntimeError`, not a `JSONDecodeError`, and would otherwise escape every handler on that path. |
 
 ### Abuse of the sign-in endpoint
 
