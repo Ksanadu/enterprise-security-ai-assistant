@@ -61,6 +61,14 @@ class RoleScopeResponse(BaseModel):
 
 
 class IndexStatsResponse(BaseModel):
+    """Index health, for any authenticated role.
+
+    Counts and provider names only. The knowledge base's **path on disk** is
+    deliberately absent: it is a server detail no client needs, and it discloses
+    the operating system, the account the service runs as and the deployment
+    layout to anyone who can sign in.
+    """
+
     ready: bool
     document_count: int
     chunk_count: int
@@ -68,5 +76,4 @@ class IndexStatsResponse(BaseModel):
     embedding_provider: str
     vector_store: str
     documents_per_role: dict[str, int] = Field(default_factory=dict)
-    knowledge_base_dir: str
     reindexed: bool = False

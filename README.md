@@ -112,6 +112,17 @@ specification's requirements:
   frontend build.
 * 520 backend tests + 28 frontend tests; `ruff`, `mypy`, `tsc` and `eslint` clean.
 
+Re-verifying this phase against the specification's requirements found two metadata disclosures,
+both fixed:
+
+| Found | Fix |
+| ----- | --- |
+| `GET /knowledge/scope` listed **every** role's `document_ids`, so an employee learned the identifiers of the security team's investigation playbooks (KB-003, KB-004) - while `GET /knowledge/documents/KB-003` correctly answered 404. The refusal is supposed to be indistinguishable from "no such document", and a target list defeats that. | Every role still gets every role's description and document *count* (that is policy, and it explains why an answer was narrow); only the caller's own ids are listed. |
+| `GET /knowledge/stats` returned the knowledge base's **absolute path on disk**, disclosing the operating system, the service account and the deployment layout to anyone who could sign in. | The field is gone from the response. No client needs a server path. |
+
+A sweep of every API route as an employee now finds **zero** endpoints that disclose a restricted
+document's identifier, title or path.
+
 **Phase 5 - intent and risk classification**
 
 * **Prompt-injection guard.** Attempts to rewrite the assistant's rules, extract its
@@ -199,9 +210,9 @@ specification's requirements:
   dashboard, triage it, and check the audit trail - all through HTTP.
 * **Cross-role consistency**: the same question asked by all three roles must produce an
   identical classification and identical escalation, while retrieval differs and stays in scope.
-* **725 security-marked tests** covering RBAC, injection, leakage, session handling, ticket
+* **765 security-marked tests** covering RBAC, injection, leakage, session handling, ticket
   scoping, redaction and the deployment assets, runnable as one suite with `pytest -m security`.
-* 1095 backend tests, **94% statement coverage**; `ruff`, `mypy`, `tsc` and `eslint` clean.
+* 1135 backend tests, **94% statement coverage**; `ruff`, `mypy`, `tsc` and `eslint` clean.
 
 The set immediately earned its keep. Writing it exposed a set of real defects:
 
@@ -360,7 +371,7 @@ stale cached index). A mismatch is logged as a security event and the chunk is d
 │   ├── scripts/
 │   │   ├── demo.py               # the executable demonstration (67 checks)
 │   │   └── update_evaluation_expectations.py
-│   ├── tests/                    # 1095 tests
+│   ├── tests/                    # 1135 tests
 │   └── requirements*.txt
 ├── frontend/
 │   ├── Dockerfile                # Vite build stage → nginx runtime stage
@@ -665,12 +676,12 @@ The suite has three layers:
 
 | Layer | What it covers | How to run |
 | ----- | -------------- | ---------- |
-| Unit and integration (1095 tests) | Every module: config guards, ORM, RAG, classifiers, services, API, deployment assets | `pytest -q` |
-| Security (725 tests) | RBAC, injection, leakage, sessions, ticket scoping, redaction, deployment hardening | `pytest -m security` |
+| Unit and integration (1135 tests) | Every module: config guards, ORM, RAG, classifiers, services, API, deployment assets | `pytest -q` |
+| Security (765 tests) | RBAC, injection, leakage, sessions, ticket scoping, redaction, deployment hardening | `pytest -m security` |
 | Evaluation (61 tests) | The 40-question set and the end-to-end demo walkthrough | `pytest -m evaluation` |
 
 ```powershell
-# backend: 1095 tests, 94% statement coverage
+# backend: 1135 tests, 94% statement coverage
 cd backend
 .\.venv\Scripts\python.exe -m pytest -q
 .\.venv\Scripts\python.exe -m pytest -m security -q          # security subset

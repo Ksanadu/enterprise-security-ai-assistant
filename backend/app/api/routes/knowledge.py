@@ -174,13 +174,15 @@ def search(
     response_model=RoleScopeResponse,
     summary="Describe what each role may read",
 )
-def role_scope(request: Request, _: CurrentUser) -> RoleScopeResponse:
+def role_scope(request: Request, user: CurrentUser) -> RoleScopeResponse:
     """Documentation-style view of the RBAC policy.
 
-    Deliberately available to every authenticated role: knowing the policy is
-    not a privilege, and it lets a user understand why an answer was narrow.
+    Deliberately available to every authenticated role: knowing the policy is not
+    a privilege, and it lets a user understand why an answer was narrow.
+    Descriptions and counts cover every role; the document *ids* of another role
+    are not listed, because that would name the material the caller is refused.
     """
-    return RoleScopeResponse(roles=get_knowledge_service(request).role_scope())
+    return RoleScopeResponse(roles=get_knowledge_service(request).role_scope(user.role))
 
 
 @router.post(

@@ -287,6 +287,17 @@ categories that matched.
 | Control | `app/security/rbac.py` + the required `allowed_document_ids` argument in `VectorStore.search`. |
 | Identity | From the `user_sessions` row for the token's `jti`, not from the token's claims. |
 | Enumeration | A restricted document returns **404, not 403**, so the endpoint cannot be used to discover which restricted documents exist. Same for another user's ticket. |
+| Metadata, not just content | The refusal has to hold for *metadata* too, or the 404 is pointless. A Phase 4 re-verification found two leaks of exactly that kind: `/knowledge/scope` listed every role's document ids (naming the security team's playbooks to an employee), and `/knowledge/stats` returned the knowledge base's absolute path. Both are fixed, and a sweep of every route as an employee now finds no endpoint disclosing a restricted identifier, title or path. |
+
+### Injection is not the only way to reach the model
+
+`app/ai/prompt_guard.py` is heuristic, so it will eventually miss a novel attempt. The design does
+not depend on it: retrieval authorization happens *before* the model is involved, so a successful
+injection has nothing restricted to extract. `tests/test_rbac_adversarial.py` makes this concrete by
+running the pipeline with a deliberately hostile model that claims administrator rights, fabricates
+citations for restricted documents and names them in its answer. The caller's reach is unchanged and
+the fabricated citations are discarded, because the citation list is built from the retrieval result
+rather than from anything the model returned.
 
 ### Sensitive information leakage
 

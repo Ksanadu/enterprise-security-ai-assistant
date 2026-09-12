@@ -85,8 +85,20 @@ def authorized_document_ids(items: Iterable[_HasAllowedRoles], role: Role) -> fr
     return frozenset(item.document_id for item in items if permits(item, role))
 
 
-def describe_role(role: Role, documents: Sequence[_HasAllowedRoles] = ()) -> dict[str, object]:
-    """Explain a role's scope, optionally with live document counts."""
+def describe_role(
+    role: Role,
+    documents: Sequence[_HasAllowedRoles] = (),
+    *,
+    include_document_ids: bool = True,
+) -> dict[str, object]:
+    """Explain a role's scope, optionally with live document counts.
+
+    ``include_document_ids`` exists for the API: a caller may be told what a role
+    can reach in general, and how many documents that is, but the *identity* of
+    another role's documents is a target list. Listing them for everyone would
+    also contradict answering 404 rather than 403 for a restricted document -
+    the refusal is supposed to be indistinguishable from "no such document".
+    """
     reachable = filter_authorized(documents, role) if documents else []
     return {
         "role": role.value,
@@ -94,7 +106,11 @@ def describe_role(role: Role, documents: Sequence[_HasAllowedRoles] = ()) -> dic
         "rank": role.rank,
         "description": ROLE_SCOPE_DESCRIPTIONS[role],
         "document_count": len(reachable) if documents else None,
-        "document_ids": sorted(item.document_id for item in reachable) if documents else [],
+        "document_ids": (
+            sorted(item.document_id for item in reachable)
+            if documents and include_document_ids
+            else []
+        ),
     }
 
 

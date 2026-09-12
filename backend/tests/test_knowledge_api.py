@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import json
+
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import select
@@ -244,6 +246,57 @@ class TestScopeEndpoint:
         for entry in body["roles"]:
             assert entry["description"]
 
+    def test_scope_does_not_name_another_roles_documents(
+        self, client: TestClient, employee_headers
+    ) -> None:
+        """The policy is public; another role's document ids are not.
+
+        This endpoint used to list every role's `document_ids`, which told an
+        employee the identifiers of the security team's investigation playbooks -
+        while `GET /knowledge/documents/KB-003` correctly answered 404. The
+        refusal is supposed to be indistinguishable from "no such document", and
+        a target list defeats that.
+        """
+        body = client.get("/api/v1/knowledge/scope", headers=employee_headers).json()
+        by_role = {entry["role"]: entry for entry in body["roles"]}
+
+        # The caller's own ids are useful and still listed.
+        assert set(by_role["employee"]["document_ids"]) == EMPLOYEE_VISIBLE
+
+        # Another role's ids are not.
+        for other in ("it", "security"):
+            assert by_role[other]["document_ids"] == [], other
+
+        # And nothing restricted appears anywhere in the response.
+        text = json.dumps(body)
+        for restricted in ("KB-003", "KB-004"):
+            assert restricted not in text, f"{restricted} was disclosed to an employee"
+
+    def test_scope_still_reports_counts_and_descriptions_for_every_role(
+        self, client: TestClient, employee_headers
+    ) -> None:
+        # Suppressing the leak must not gut the endpoint's purpose: a user still
+        # learns what each role can reach and how much, without being handed the
+        # names of the material they are refused.
+        body = client.get("/api/v1/knowledge/scope", headers=employee_headers).json()
+        by_role = {entry["role"]: entry for entry in body["roles"]}
+        assert set(by_role) == {"employee", "it", "security"}
+        assert by_role["employee"]["document_count"] == len(EMPLOYEE_VISIBLE)
+        assert by_role["it"]["document_count"] == len(EMPLOYEE_VISIBLE | IT_ONLY)
+        assert by_role["security"]["document_count"] == 12
+        for entry in body["roles"]:
+            assert entry["description"]
+
+    def test_the_security_team_sees_its_own_full_scope(
+        self, client: TestClient, security_headers
+    ) -> None:
+        # The restriction is about whose ids are listed, not about hiding the
+        # policy from the role that owns it.
+        body = client.get("/api/v1/knowledge/scope", headers=security_headers).json()
+        by_role = {entry["role"]: entry for entry in body["roles"]}
+        assert len(by_role["security"]["document_ids"]) == 12
+        assert by_role["employee"]["document_ids"] == []
+
 
 class TestStatsAndReindex:
     def test_stats_are_visible_to_any_role(self, client: TestClient, employee_headers) -> None:
@@ -257,6 +310,20 @@ class TestStatsAndReindex:
         raw = client.get("/api/v1/knowledge/stats", headers=employee_headers).text
         assert "Password Policy" not in raw
         assert "KB-001" not in raw
+
+    def test_stats_never_expose_a_server_path(self, client: TestClient, employee_headers) -> None:
+        """A filesystem path is a server detail, not a client one.
+
+        It used to be returned, which disclosed the operating system, the account
+        the service runs under and the deployment layout to anyone who could sign
+        in - reconnaissance for free.
+        """
+        body = client.get("/api/v1/knowledge/stats", headers=employee_headers).json()
+        assert "knowledge_base_dir" not in body
+
+        raw = client.get("/api/v1/knowledge/stats", headers=employee_headers).text.lower()
+        for marker in ("knowledge_base", ":\\", "c:/", "/home/", "/app/", "users\\"):
+            assert marker not in raw, f"a server path leaked: {marker!r}"
 
     def test_reindex_is_denied_for_employee(self, client: TestClient, employee_headers) -> None:
         response = client.post("/api/v1/knowledge/reindex", headers=employee_headers)

@@ -94,9 +94,20 @@ class KnowledgeService:
         """Alias used by the chat pipeline (Phase 5)."""
         return self.search(query, role=role, top_k=top_k)
 
-    def role_scope(self) -> list[dict[str, Any]]:
-        """Explain what each role can reach, with live counts."""
-        return [describe_role(role, self._index.documents) for role in Role]
+    def role_scope(self, requester: Role) -> list[dict[str, Any]]:
+        """Explain what each role can reach.
+
+        Every role gets every role's description and document **count** - that is
+        policy, and a user needs it to understand why an answer was narrow. Only
+        the requester's own document ids are listed. Handing an employee the ids
+        of the security team's investigation playbooks would be a target list,
+        and would contradict the deliberate 404 (rather than 403) for a document
+        the caller may not read.
+        """
+        return [
+            describe_role(role, self._index.documents, include_document_ids=role is requester)
+            for role in Role
+        ]
 
     def categories(self, role: Role) -> dict[str, int]:
         counts: dict[str, int] = {}
