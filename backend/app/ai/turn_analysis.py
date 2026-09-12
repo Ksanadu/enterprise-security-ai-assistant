@@ -30,6 +30,13 @@ class TurnAnalysis:
     #: Set when the workflow created or escalated a ticket for this turn.
     ticket_reference: str | None = None
     ticket_status: str | None = None
+    #: Which tier of the workflow this turn landed in: none, create, escalate,
+    #: suggest or clarify. Exposed so the client can show the user what the
+    #: system decided rather than leaving them to infer it from side effects.
+    workflow_action: str = "none"
+    #: Set when the workflow responded by asking for one more detail instead of
+    #: filing a ticket (the medium-risk tier).
+    clarifying_question: str | None = None
 
     @property
     def requires_escalation(self) -> bool:
@@ -49,4 +56,5 @@ class TurnAnalysis:
             "blocked": self.blocked,
             "context_injections_removed": self.context_findings,
             "ticket_reference": self.ticket_reference,
+            "workflow_action": self.workflow_action,
         }

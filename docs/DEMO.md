@@ -239,7 +239,7 @@ PRODUCT_SPEC.md §9. Each criterion with the evidence that it is met.
 | 10 | Docker Compose 可以启动整个系统 | `docker-compose.yml` + 83 static checks in `tests/test_deployment_assets.py` | [README § Deployment](../README.md#deployment) - **not executed here; no container runtime was available** |
 | 11 | 提供 README | [`README.md`](../README.md) | |
 | 12 | 提供至少 30 个测试问题 | **40** questions in `tests/data/evaluation_questions.json` | `pytest -m evaluation -q -s` |
-| 13 | 提供基本自动化测试 | 1259 backend tests (94% statement coverage) and 59 frontend tests | `scripts/check.ps1` |
+| 13 | 提供基本自动化测试 | 1281 backend tests (94% statement coverage) and 59 frontend tests | `scripts/check.ps1` |
 
 Additional security requirements from §7 are covered threat-by-threat in
 [ARCHITECTURE.md § Security model](ARCHITECTURE.md#7-security-model).

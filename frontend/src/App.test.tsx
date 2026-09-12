@@ -127,6 +127,8 @@ function assistantMessage(id: number, overrides: Partial<ChatMessage> = {}): Cha
       context_injection_blocked: 0,
       ticket_reference: null,
       ticket_status: null,
+      workflow_action: 'none',
+      clarifying_question: null,
     },
     created_at: '2024-03-01T10:00:00Z',
     ...overrides,

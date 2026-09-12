@@ -124,7 +124,19 @@ export interface MessagePayload {
   /** Set when the workflow manager created or escalated a ticket for this turn. */
   ticket_reference: string | null
   ticket_status: string | null
+  /**
+   * Which workflow tier this turn landed in.
+   *
+   * `create` and `escalate` filed a security ticket, `clarify` asked for one
+   * more detail instead of filing, `suggest` offered one, `none` means the
+   * grounded answer was the whole response.
+   */
+  workflow_action: WorkflowAction
+  /** The question asked instead of filing, on the medium-risk tier. */
+  clarifying_question: string | null
 }
+
+export type WorkflowAction = 'none' | 'create' | 'escalate' | 'suggest' | 'clarify'
 
 /* --------------------------------------------------------------- tickets -- */
 

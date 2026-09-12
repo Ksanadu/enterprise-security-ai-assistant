@@ -60,6 +60,10 @@ class AuditAction:
     TICKET_STATUS_DENIED = "ticket.status.denied"
     TICKET_NOTE_ADDED = "ticket.note.added"
     TICKET_SUGGESTED = "ticket.suggested"
+    #: The assistant asked for one more detail instead of filing a medium-risk report.
+    WORKFLOW_CLARIFICATION_REQUESTED = "workflow.clarification.requested"
+    #: The workflow decision could not be carried out (e.g. the ticket write failed).
+    WORKFLOW_FAILED = "workflow.failed"
     TICKET_ESCALATED = "ticket.escalated"
 
     ESCALATION_TRIGGERED = "escalation.triggered"

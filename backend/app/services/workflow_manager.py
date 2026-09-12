@@ -4,16 +4,20 @@ This is the component the specification calls the "workflow decision". It answer
 one question - *does this turn need a ticket, and does it need a person?* - and
 it answers it from the risk assessment in explicit code, never from model output.
 
-The rules, in order:
+Three tiers, one per risk band:
 
-1. **High or critical risk** creates a ticket owned by the security team, in the
-   ``escalated`` state, flagged as requiring a human.
-2. **Medium risk from a phishing or incident turn** opens a ticket for the
-   security team, without a mandatory human step.
-3. **IT support requests** are only *suggested*: the assistant tells the user a
-   ticket can be raised, and the user decides. Specification scenario D asks for
-   advice, not paperwork.
-4. **Anything else** creates nothing.
+* **High or critical** - file a Security ticket, assign it to the security team,
+  and record the escalation in the audit log. A person must look at it.
+* **Medium** - the decisive fact is missing, so ask **one** clarifying question
+  instead of filing. A click that turns out to have been harmless should not
+  occupy the queue, and "did you enter your password?" is the first thing a duty
+  analyst asks anyway. Answering the question moves the turn to whichever tier
+  the new information warrants.
+* **Low** - self-service: the grounded answer is the whole response, and nothing
+  is filed.
+
+An IT service request is *offered* a ticket rather than given one: specification
+scenario D asks for advice, not paperwork.
 
 If the same conversation already has a live ticket, a worse turn **escalates that
 ticket** instead of opening a second one. Duplicate tickets for one incident are
@@ -36,7 +40,7 @@ from app.services.ticket_service import TicketService
 
 logger = logging.getLogger(__name__)
 
-WorkflowAction = Literal["none", "create", "escalate", "suggest"]
+WorkflowAction = Literal["none", "create", "escalate", "suggest", "clarify"]
 
 #: Intents that describe an event which has already happened.
 INCIDENT_INTENTS = frozenset({Intent.PHISHING, Intent.SECURITY_INCIDENT})
@@ -66,6 +70,9 @@ class WorkflowDecision:
     escalation_required: bool = False
     initial_status: TicketStatus = TicketStatus.OPEN
     suggested_action: str = ""
+    #: Set for the ``clarify`` action: the one question that would let the next
+    #: turn be triaged properly.
+    clarifying_question: str = ""
 
     @property
     def creates_ticket(self) -> bool:
@@ -143,24 +150,29 @@ class WorkflowManager:
                 initial_status=TicketStatus.ESCALATED,
             )
 
-        # 2. A confirmed medium-risk event is tracked, but not escalated.
+        # 2. A medium-risk report is not yet an actionable incident: the fact that
+        #    decides its severity is missing. Ask for it rather than filing, which
+        #    is both what a duty analyst does first and what keeps the queue free
+        #    of clicks that turn out to have been harmless.
         if risk.level is RiskLevel.MEDIUM and intent in INCIDENT_INTENTS:
             if existing_ticket is not None:
-                # The existing ticket already covers it; nothing to do.
+                # Already being tracked; a question is not needed to re-open it.
                 return WorkflowDecision(
                     action="none",
                     reason=f"{existing_ticket.reference} already tracks this conversation",
                 )
             return WorkflowDecision(
-                action="create",
-                reason="a medium-risk security event was reported",
+                action="clarify",
+                reason=(
+                    "a medium-risk report is missing the detail that decides whether "
+                    "it needs a ticket"
+                ),
                 title=title,
-                description=self._description(analysis, question),
                 category=category,
                 severity=Severity.MEDIUM,
                 owner_role=Role.SECURITY,
                 escalation_required=False,
-                initial_status=TicketStatus.OPEN,
+                clarifying_question=self._clarifying_question(analysis),
             )
 
         # 3. Service requests are offered, not imposed.
@@ -288,9 +300,62 @@ class WorkflowManager:
                 resource_id=conversation_id,
                 detail={"suggested_owner": decision.owner_role.value},
             )
+
+        if decision.action == "clarify":
+            # Not a ticket, but still a decision worth recording: the follow-up
+            # answer is what determines whether this becomes an incident, and a
+            # reviewer needs to see that the system asked rather than ignored it.
+            record_audit(
+                session,
+                action=AuditAction.WORKFLOW_CLARIFICATION_REQUESTED,
+                actor=user,
+                resource_type="conversation",
+                resource_id=conversation_id,
+                detail={
+                    "reason": decision.reason,
+                    "severity": decision.severity.value,
+                    "risk_level": analysis.risk.level.value,
+                    "would_own": decision.owner_role.value,
+                },
+            )
         return None
 
     # -- text -------------------------------------------------------------
+    @staticmethod
+    def _clarifying_question(analysis: TurnAnalysis) -> str:
+        """The single question that would move this report off the fence.
+
+        It is derived from what the classifier has *not* seen, so it asks about
+        the missing decisive fact rather than asking the user to repeat
+        themselves. For a phishing report that is almost always whether
+        credentials were entered - the difference between medium and high.
+        """
+        signals = {signal.label for signal in analysis.risk.signals}
+
+        if analysis.intent is Intent.PHISHING:
+            if "credentials_submitted" not in signals:
+                return (
+                    "Did you enter your password or any code on that page, or did you "
+                    "only open the link? That is what decides whether this needs the "
+                    "security team."
+                )
+            return (
+                "Did anything else happen on the device - a download, a prompt you did "
+                "not expect, or a change you did not make?"
+            )
+
+        if analysis.intent is Intent.SECURITY_INCIDENT:
+            return (
+                "Is the device still running and connected to the company network, and "
+                "has anything been installed or changed since? That is what decides "
+                "whether this needs the security team."
+            )
+
+        return (
+            "What exactly happened, and is it still happening? That is what decides "
+            "whether this needs the security team."
+        )
+
     @staticmethod
     def _title(question: str) -> str:
         """A ticket title taken from the user's own words."""

@@ -15,10 +15,12 @@ from __future__ import annotations
 import dataclasses
 import logging
 import re
+from dataclasses import replace
 
 from app.ai.llm import (
     LLMClient,
     LLMResponse,
+    MockLLMClient,
     get_llm_client,
     looks_truncated,
     split_sentences,
@@ -113,6 +115,25 @@ def extract_actions(context: str, *, limit: int = MAX_ACTIONS) -> list[str]:
 class ResponseGenerator:
     """Turns a retrieval result into an answer."""
 
+    def _offline_completion(self, *, context: str, question: str, role: Role) -> LLMResponse:
+        """Answer from the retrieved context without any provider.
+
+        The fallback of last resort: the model is unreachable, but the authorised
+        documents are already in memory, so the deterministic extractive
+        generator can still produce a grounded, cited answer. It reports itself as
+        the ``offline-fallback`` provider so the payload says honestly which path
+        answered rather than implying the configured model did.
+        """
+        fallback = MockLLMClient()
+        completion = fallback.complete(
+            system_prompt=SYSTEM_PROMPT,
+            user_prompt=build_user_prompt(
+                question=question, role=role, document_titles=[]
+            ),
+            context_block=context,
+        )
+        return replace(completion, provider="offline-fallback")
+
     def __init__(
         self,
         settings: Settings | None = None,
@@ -157,11 +178,23 @@ class ResponseGenerator:
         titles = [str(source["title"]) for source in sources]
 
         user_prompt = build_user_prompt(question=question, role=role, document_titles=titles)
-        completion = self._client.complete(
-            system_prompt=SYSTEM_PROMPT,
-            user_prompt=user_prompt,
-            context_block=context,
-        )
+        try:
+            completion = self._client.complete(
+                system_prompt=SYSTEM_PROMPT,
+                user_prompt=user_prompt,
+                context_block=context,
+            )
+        except Exception:
+            # A provider that is down, rate-limiting or timing out must not cost
+            # the user their answer. The retrieved, authorised documents are
+            # already in hand, so fall back to the offline extractive generator
+            # over the same context: same sources, same citations, no model.
+            logger.warning(
+                "llm_call_failed provider=%s - falling back to the offline generator",
+                self._client.name,
+                exc_info=True,
+            )
+            completion = self._offline_completion(context=context, question=question, role=role)
 
         answer = completion.text.strip()
         if not answer:

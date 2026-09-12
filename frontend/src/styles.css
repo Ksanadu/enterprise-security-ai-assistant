@@ -645,6 +645,37 @@ code {
 
 /* ------------------------------------------- raise-a-ticket follow-up -- */
 
+/* Medium-risk tier: the assistant asks instead of filing. */
+.clarify {
+  margin-top: 0.75rem;
+  background: #fffbeb;
+  border: 1px solid #fde68a;
+  border-left-width: 4px;
+  border-radius: var(--radius-sm);
+  padding: 0.6rem 0.8rem;
+}
+
+.clarify__title {
+  margin: 0 0 0.3rem;
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: #92400e;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.clarify__text {
+  margin: 0;
+  font-size: 0.92rem;
+  color: var(--color-text);
+}
+
+.clarify__note {
+  margin: 0.4rem 0 0;
+  font-size: 0.8rem;
+  color: var(--color-muted);
+}
+
 .bubble__follow-up {
   margin-top: 0.75rem;
   display: flex;

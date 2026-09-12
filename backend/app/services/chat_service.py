@@ -36,7 +36,7 @@ from app.rag.retriever import RetrievalResult
 from app.security.audit import AuditAction, record_audit
 from app.security.redaction import redact_credentials
 from app.services.knowledge_service import KnowledgeService, KnowledgeUnavailableError
-from app.services.workflow_manager import WorkflowManager
+from app.services.workflow_manager import WorkflowDecision, WorkflowManager
 
 logger = logging.getLogger(__name__)
 
@@ -344,18 +344,27 @@ class ChatService:
         # 6. Workflow decision: does this need a ticket, and does it need a person?
         #    The ticket side is performed here so the assistant's answer can name
         #    the reference it just created.
-        ticket = self._apply_workflow(
+        ticket, decision = self._apply_workflow(
             session,
             analysis=analysis,
             user=user,
             conversation=conversation,
             question=question,
         )
-        if ticket is not None:
-            analysis = dataclasses.replace(
-                analysis,
-                ticket_reference=ticket.reference,
-                ticket_status=ticket.status.value,
+        analysis = dataclasses.replace(
+            analysis,
+            ticket_reference=ticket.reference if ticket is not None else None,
+            ticket_status=ticket.status.value if ticket is not None else None,
+            workflow_action=decision.action,
+            clarifying_question=decision.clarifying_question or None,
+        )
+
+        # The medium-risk tier answers by asking. The question belongs in the
+        # answer itself, not only in the structured field, or the user reads a
+        # complete-looking reply and never sees that something was asked of them.
+        if decision.clarifying_question:
+            generated = dataclasses.replace(
+                generated, answer=f"{generated.answer}\n\n{decision.clarifying_question}"
             )
 
         assistant_message = Message(
@@ -484,8 +493,13 @@ class ChatService:
         user: User,
         conversation: Conversation,
         question: str,
-    ) -> Ticket | None:
-        """Run the workflow decision and perform it. Returns the affected ticket."""
+    ) -> tuple[Ticket | None, WorkflowDecision]:
+        """Run the workflow decision and perform it.
+
+        Returns the affected ticket (or ``None``) *and* the decision, so the
+        caller can record which tier the turn landed in and relay a clarifying
+        question to the user.
+        """
         existing = self._workflow.tickets.find_open_for_conversation(
             session, conversation_id=conversation.id
         )
@@ -493,20 +507,74 @@ class ChatService:
             analysis=analysis, question=question, existing_ticket=existing
         )
         logger.info(
-            "workflow_decision conversation_id=%s action=%s reason=%s",
+            "workflow_decision conversation_id=%s action=%s reason=%s risk=%s",
             conversation.id,
             decision.action,
             decision.reason,
+            analysis.risk.level.value,
         )
-        return self._workflow.apply(
-            session,
-            decision=decision,
-            user=user,
-            analysis=analysis,
-            conversation_id=conversation.id,
-            question=question,
-            existing_ticket=existing,
-        )
+        try:
+            return (
+                self._workflow.apply(
+                    session,
+                    decision=decision,
+                    user=user,
+                    analysis=analysis,
+                    conversation_id=conversation.id,
+                    question=question,
+                    existing_ticket=existing,
+                ),
+                decision,
+            )
+        except Exception:
+            # The answer has already been generated and is still worth delivering.
+            # A ticket that could not be filed is an operational problem, not a
+            # reason to lose the user's incident report on the floor - so this is
+            # recorded loudly and the turn continues without a reference.
+            logger.exception(
+                "workflow_apply_failed conversation_id=%s action=%s risk=%s",
+                conversation.id,
+                decision.action,
+                analysis.risk.level.value,
+            )
+            self._record_workflow_failure(
+                session, conversation_id=conversation.id, user=user, decision=decision
+            )
+            return None, decision
+
+    def _record_workflow_failure(
+        self,
+        session: Session,
+        *,
+        conversation_id: int,
+        user: User,
+        decision: WorkflowDecision,
+    ) -> None:
+        """Leave a trace that the workflow could not complete.
+
+        Without this the only evidence would be a log line: the user is told to
+        contact the service desk, and nobody can reconcile which reports failed to
+        be filed.
+        """
+        try:
+            record_audit(
+                session,
+                action=AuditAction.WORKFLOW_FAILED,
+                actor=user,
+                resource_type="conversation",
+                resource_id=conversation_id,
+                detail={
+                    "action": decision.action,
+                    "reason": decision.reason,
+                    "severity": decision.severity.value,
+                    "owner_role": decision.owner_role.value,
+                },
+                commit=True,
+            )
+        except Exception:
+            # If even the audit write fails, do not escalate the failure further:
+            # the request still deserves an answer.
+            logger.exception("workflow_audit_failed conversation_id=%s", conversation_id)
 
     def _build_payload(
         self, generated: GeneratedAnswer, analysis: TurnAnalysis
@@ -547,6 +615,8 @@ class ChatService:
             "context_injection_blocked": analysis.context_findings,
             "ticket_reference": analysis.ticket_reference,
             "ticket_status": analysis.ticket_status,
+            "workflow_action": analysis.workflow_action,
+            "clarifying_question": analysis.clarifying_question,
         }
 
     def _empty_retrieval(self, query: str, role: Role) -> RetrievalResult:

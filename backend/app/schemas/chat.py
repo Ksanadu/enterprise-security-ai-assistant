@@ -75,6 +75,13 @@ class MessagePayload(BaseModel):
     ticket_reference: str | None = None
     ticket_status: str | None = None
 
+    #: Which workflow tier this turn landed in: none, create, escalate, suggest
+    #: or clarify. Exposed so the client can show the decision instead of leaving
+    #: the user to infer it from the presence of a ticket.
+    workflow_action: str = "none"
+    #: The question the assistant is asking instead of filing (medium risk).
+    clarifying_question: str | None = None
+
 
 class MessageOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)

@@ -70,10 +70,16 @@ class TestTicketCreationFromChat:
         assert created.owner_role is Role.SECURITY
         assert created.escalation_required is True
 
-    def test_medium_phishing_report_opens_a_ticket_without_escalation(
+    def test_medium_phishing_report_asks_before_filing(
         self, client: TestClient, employee_headers
     ) -> None:
-        """A clicked link with nothing entered is S3: tracked, not escalated."""
+        """A clicked link with nothing entered is S3: ask, do not file yet.
+
+        The medium tier exists because the fact that decides the severity is
+        missing. Filing here would put a click that turns out to be harmless into
+        the security queue; asking is what a duty analyst does first.
+        """
+        before = len(all_tickets())
         conversation_id = new_conversation(client, employee_headers)
         payload = ask(
             client,
@@ -82,16 +88,80 @@ class TestTicketCreationFromChat:
             "I clicked the link in that email but did not enter anything.",
         )
         assert payload["risk_level"] == "medium"
-        assert payload["ticket_reference"]
-        assert payload["ticket_status"] == "open"
+        assert payload["workflow_action"] == "clarify"
+        assert payload["ticket_reference"] is None
         assert payload["human_escalation"] is False
 
-        with session_scope() as session:
-            ticket = session.scalar(
-                select(Ticket).where(Ticket.reference == payload["ticket_reference"])
-            )
-        assert ticket is not None
-        assert ticket.escalation_required is False
+        # It asks about the missing decisive fact, not something generic.
+        question = payload["clarifying_question"]
+        assert question, "a clarifying turn must actually ask something"
+        assert "password" in question.lower() or "code" in question.lower()
+
+        assert len(all_tickets()) == before, "nothing should be filed yet"
+
+    def test_the_clarifying_question_reaches_the_user(
+        self, client: TestClient, employee_headers
+    ) -> None:
+        # A structured field nobody reads is not "asking". The question has to be
+        # in the answer text the user actually sees.
+        conversation_id = new_conversation(client, employee_headers)
+        payload = ask(
+            client,
+            employee_headers,
+            conversation_id,
+            "I clicked the link in that email but did not enter anything.",
+        )
+        detail = client.get(
+            f"/api/v1/chat/conversations/{conversation_id}", headers=employee_headers
+        ).json()
+        answer = detail["messages"][-1]["content"]
+        assert payload["clarifying_question"] in answer
+        assert answer.rstrip().endswith(payload["clarifying_question"].rstrip())
+
+    def test_answering_the_question_moves_the_turn_to_the_right_tier(
+        self, client: TestClient, employee_headers
+    ) -> None:
+        """The follow-up decides: credentials entered means a real incident."""
+        conversation_id = new_conversation(client, employee_headers)
+        first = ask(
+            client,
+            employee_headers,
+            conversation_id,
+            "I clicked the link in that email but did not enter anything.",
+        )
+        assert first["workflow_action"] == "clarify"
+        assert first["ticket_reference"] is None
+
+        second = ask(
+            client,
+            employee_headers,
+            conversation_id,
+            "I did enter my password on that page after all.",
+        )
+        assert second["risk_level"] == "high"
+        assert second["human_escalation"] is True
+        assert second["ticket_reference"], "the answer turned this into a real incident"
+
+    def test_a_medium_report_that_is_already_tracked_is_not_asked_again(
+        self, client: TestClient, employee_headers
+    ) -> None:
+        # Asking once is triage; asking again is noise. Once a conversation has a
+        # live ticket, a further medium turn attaches to it silently.
+        conversation_id = new_conversation(client, employee_headers)
+        ask(
+            client,
+            employee_headers,
+            conversation_id,
+            "I entered my password on the phishing page.",
+        )
+        repeated = ask(
+            client,
+            employee_headers,
+            conversation_id,
+            "Someone may have accessed my account.",
+        )
+        assert repeated["workflow_action"] in {"none", "escalate"}
+        assert repeated["clarifying_question"] is None
 
     def test_a_report_with_no_interaction_files_nothing(
         self, client: TestClient, employee_headers
@@ -150,15 +220,15 @@ class TestTicketCreationFromChat:
 
 
 class TestEscalationOfAnExistingTicket:
-    def test_the_demo_scenario_escalates_the_same_ticket(
+    def test_a_worse_turn_escalates_the_same_ticket(
         self, client: TestClient, employee_headers
     ) -> None:
-        """PRODUCT_SPEC.md section 10, with the ticket side included.
+        """One incident, one ticket.
 
-        A clicked link with nothing entered is S3 and opens a ticket. When the
-        user then reveals they entered their password, the level rises to S2 -
-        and that **escalates the existing ticket** rather than opening a second
-        one, which is how queues rot.
+        A high-risk turn files a ticket. A later turn in the same conversation
+        must attach to that ticket - escalating it if it is worse, leaving it
+        alone if it is not - rather than opening a second one, which is how
+        queues rot.
         """
         before = len(all_tickets())
         conversation_id = new_conversation(client, employee_headers)
@@ -167,32 +237,58 @@ class TestEscalationOfAnExistingTicket:
             client,
             employee_headers,
             conversation_id,
-            "I clicked the link in that email but did not enter anything.",
+            "I entered my password on a fake login page.",
         )
-        assert first["risk_level"] == "medium"
-        assert first["ticket_status"] == "open"
+        assert first["risk_level"] == "high"
+        assert first["workflow_action"] == "create"
         reference = first["ticket_reference"]
         assert reference
+        assert first["ticket_status"] == "escalated"
 
         second = ask(
             client,
             employee_headers,
             conversation_id,
-            "I entered my password on that page before I realised it was fake.",
+            "I also entered my password on the second page it sent me to.",
         )
         assert second["risk_level"] == "high"
-        assert second["human_escalation"] is True
-        # The same ticket, now escalated - not a second one.
+        assert second["workflow_action"] == "escalate"
+        # The same ticket, not a second one.
         assert second["ticket_reference"] == reference
         assert second["ticket_status"] == "escalated"
-
         assert len(all_tickets()) == before + 1
+
         with session_scope() as session:
             ticket = session.scalar(select(Ticket).where(Ticket.reference == reference))
         assert ticket is not None
         assert ticket.status is TicketStatus.ESCALATED
         assert ticket.severity is Severity.HIGH
         assert ticket.escalation_required is True
+
+    def test_a_milder_turn_afterwards_does_not_duplicate_or_re_ask(
+        self, client: TestClient, employee_headers
+    ) -> None:
+        before = len(all_tickets())
+        conversation_id = new_conversation(client, employee_headers)
+
+        first = ask(
+            client,
+            employee_headers,
+            conversation_id,
+            "I entered my password on a fake login page.",
+        )
+        assert first["ticket_reference"]
+
+        second = ask(
+            client,
+            employee_headers,
+            conversation_id,
+            "Someone may have accessed my account.",
+        )
+        # Already tracked: neither a second ticket nor another question.
+        assert second["workflow_action"] in {"none", "escalate"}
+        assert second["clarifying_question"] is None
+        assert len(all_tickets()) == before + 1
 
     def test_a_first_turn_escalation_creates_an_escalated_ticket(
         self, client: TestClient, employee_headers

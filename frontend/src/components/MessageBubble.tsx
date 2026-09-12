@@ -93,6 +93,17 @@ export function MessageBubble({
         </p>
       )}
 
+      {payload?.workflow_action === 'clarify' && payload.clarifying_question && (
+        <section className="clarify" aria-label="More information needed">
+          <h3 className="clarify__title">One more detail needed</h3>
+          <p className="clarify__text">{payload.clarifying_question}</p>
+          <p className="clarify__note">
+            Nothing has been filed yet. Your answer decides whether this needs the security
+            team.
+          </p>
+        </section>
+      )}
+
       {canRaiseTicket && (
         <div className="bubble__follow-up">
           <button

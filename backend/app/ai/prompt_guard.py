@@ -145,6 +145,43 @@ ACCESS_BYPASS: tuple[tuple[str, str], ...] = (
         "access_bypass",
         r"\bas\s+(?:an?\s+)?(?:admin|administrator|security\s+team\s+member)\s*,?\s*(?:show|tell|give|list)",
     ),
+    # Claiming an elevated role *and* asking for material in the same breath.
+    #
+    # The claim alone is not enough: "who is on the security team?" and "as the
+    # security team we log every report" are both legitimate. Three things keep
+    # this precise:
+    #
+    #   * the request has to name *material*, not any old object;
+    #   * the verb and the noun may sit a little apart, so "quote the malware
+    #     incident response SOP" is caught but "read every incident report" is not;
+    #   * the verb may not be preceded by a subject pronoun. The injection is an
+    #     imperative ("reveal the knowledge base"); "my role is security and I
+    #     read the policy every day" is a person describing their job.
+    (
+        "access_bypass",
+        r"\b(?:as|i\s+am|i'?m|acting\s+as)\s+(?:an?\s+|the\s+)?"
+        r"(?:admin(?:istrator)?|root|superuser|privileged|security(?:\s+team)?)\b"
+        r"[\s\S]{0,60}?"
+        r"(?<!\bi\s)(?<!\bwe\s)(?<!\bthey\s)"
+        r"\b(?:show|give|send|provide|share|tell|quote|list|reveal|print|display|dump|"
+        r"export|read|open)\b"
+        r"[\s\S]{0,45}?"
+        r"\b(?:documents?|files?|records?|polic(?:y|ies)|playbooks?|sops?|procedures?|"
+        r"materials?|knowledge\s+base)\b",
+    ),
+    # The same claim stated as fact rather than as a role prefix.
+    (
+        "access_bypass",
+        r"\b(?:the\s+current\s+user\s+is|my\s+role\s+is|user\s+role\s*[:=]|role\s*[:=])\s*"
+        r"(?:now\s+)?(?:an?\s+)?(?:admin(?:istrator)?|root|superuser|privileged|security)\b"
+        r"[\s\S]{0,80}?"
+        r"(?<!\bi\s)(?<!\bwe\s)(?<!\bthey\s)"
+        r"\b(?:show|give|send|provide|share|tell|quote|list|reveal|print|display|dump|"
+        r"export|read|open)\b"
+        r"[\s\S]{0,45}?"
+        r"\b(?:documents?|files?|records?|polic(?:y|ies)|playbooks?|sops?|procedures?|"
+        r"materials?|knowledge\s+base)\b",
+    ),
 )
 
 BLOCKING_PATTERNS = INSTRUCTION_OVERRIDE + SECRET_EXTRACTION + ACCESS_BYPASS

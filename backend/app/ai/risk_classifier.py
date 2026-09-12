@@ -156,7 +156,19 @@ RISK_RULES: tuple[tuple[RiskLevel, str, str], ...] = (
         "credentials_submitted",
         # The possessive is optional and can be third-person: an IT agent reports
         # "a user submitted their credentials", not "I entered my password".
-        r"\b(?:entered|submitted|typed|provided|gave|filled\s+in)\s+(?:my\s+|your\s+|their\s+|his\s+|her\s+|our\s+|the\s+)?(?:password|credentials?|login\s+details|username\s+and\s+password)\b",
+        #
+        # The base form is accepted ONLY after an auxiliary, which is what the
+        # emphatic affirmative needs ("I *did* enter my password"). Accepting it
+        # generally was a mistake: it also matched "an email asking them to
+        # re-enter their credentials", where nobody has entered anything yet.
+        # `not` cannot intervene, so "I did not enter my password" still misses.
+        r"\b(?:"
+        r"(?:(?:did|do|does|have|has|had)\s+)(?:re-?)?(?:enter|submit|type|provide|give)"
+        r"|(?:re-?)?(?:entered|submitted|typed|provided|gave)"
+        r"|filled\s+in"
+        r")\s+"
+        r"(?:my\s+|your\s+|their\s+|his\s+|her\s+|our\s+|the\s+)?"
+        r"(?:password|credentials?|login\s+details|username\s+and\s+password)\b",
     ),
     (
         RiskLevel.HIGH,
