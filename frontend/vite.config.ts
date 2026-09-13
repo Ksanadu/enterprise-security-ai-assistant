@@ -86,6 +86,23 @@ export default defineConfig(({ mode }) => {
       setupFiles: ['./src/test/setup.ts'],
       css: false,
       include: ['src/**/*.{test,spec}.{ts,tsx}'],
+      coverage: {
+        provider: 'v8',
+        reporter: ['text', 'html'],
+        include: ['src/**/*.{ts,tsx}'],
+        exclude: ['src/**/*.test.{ts,tsx}', 'src/test/**', 'src/vite-env.d.ts'],
+        // Measured before these were set: 91% statements, 80% branches, 74%
+        // functions. They exist because "59 tests pass" was previously the whole
+        // story - a component that `App` never mounts is a component nothing
+        // measures, and that is exactly how a value-blind assertion survived: the
+        // suite asserted that a label rendered, never what number it carried.
+        thresholds: {
+          statements: 85,
+          branches: 75,
+          functions: 70,
+          lines: 85,
+        },
+      },
     },
   }
 })

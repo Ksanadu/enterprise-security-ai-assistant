@@ -1,9 +1,13 @@
 # Runs every quality gate for the project.
 # Usage:  pwsh -File scripts/check.ps1
 #
-#   backend  : ruff, mypy, pytest
-#   frontend : tsc, eslint, vitest
+#   backend  : ruff, mypy, pytest (with a coverage floor)
+#   frontend : tsc, eslint, vitest (with coverage thresholds)
 #   repo     : secret / ignore-rule check
+#
+# Coverage is part of the gate, not an optional extra: a suite that cannot see its
+# own blind spots needs the numbers measured on every change, or the same class of
+# defect returns the next time somebody widens a regex or deletes a test.
 
 $ErrorActionPreference = 'Continue'
 $root = Split-Path -Parent $PSScriptRoot
@@ -37,10 +41,10 @@ if (-not (Test-Path $venvPython)) {
 
 Invoke-Step 'backend: ruff'      (Join-Path $root 'backend')  "& '$venvPython' -m ruff check app tests"
 Invoke-Step 'backend: mypy'      (Join-Path $root 'backend')  "& '$venvPython' -m mypy app"
-Invoke-Step 'backend: pytest'    (Join-Path $root 'backend')  "& '$venvPython' -m pytest -q"
+Invoke-Step 'backend: pytest'    (Join-Path $root 'backend')  "& '$venvPython' -m pytest -q --cov=app --cov-report=term-missing"
 Invoke-Step 'frontend: typecheck' (Join-Path $root 'frontend') 'npx tsc -b'
 Invoke-Step 'frontend: eslint'   (Join-Path $root 'frontend') 'npm run lint'
-Invoke-Step 'frontend: vitest'   (Join-Path $root 'frontend') 'npm test'
+Invoke-Step 'frontend: vitest'   (Join-Path $root 'frontend') 'npm run test:coverage'
 Invoke-Step 'repo: secrets'      $root                        "& (Join-Path '$PSScriptRoot' 'check-no-secrets.ps1')"
 
 Write-Host ''

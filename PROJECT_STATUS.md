@@ -119,10 +119,33 @@ independent defect register is `Reviewer Report.md`.
       (escalation always comes with a ticket; a ticket without escalation is only this tracking
       tier), and `phish-003`'s expectation now records that a medium phishing report is tracked.
 
+**Round 5 — the tests, and a pipeline that runs them — DONE**
+
+- [x] P1-07 (Reviewer P1-7) — the frontend suite's blind spots are closed:
+      - two **vacuous** assertions (`expect((await screen.findAllByText(...)).length).toBeGreaterThan(0)`)
+        replaced with assertions on *where* the text appears (the answer body, scoped);
+      - the queue-statistics test asserted only that a `<dt>` label rendered, so it passed with every
+        number 0 or `NaN`; it now asserts the numbers bound to their labels;
+      - the distributions test asserted five static card titles and passed with all-`NaN` data and an
+        empty daily series; it now asserts the fixture's values per card and the two rendered days;
+      - `getByText(/7/)` (satisfied by any text containing a digit 7) replaced with the count itself;
+      - the "never offers a role switcher" guard only looked for a `combobox`, so a button- or
+        link-based switcher slipped through; it now checks buttons, links and listboxes too.
+      Each fix was **mutation-verified**: the zeroing/`NaN` mutants that used to pass now fail.
+- [x] Frontend coverage tooling: `@vitest/coverage-v8` with statement/branch/function thresholds
+      (measured 91.4% / 80.4% / 74.4% before they were set), plus a `test:coverage` script. The gap
+      that let a value-blind test survive - a component `App` never mounts is measured by nothing -
+      can no longer pass unnoticed.
+- [x] Backend coverage: `app/main.py` is no longer omitted (the module that wires the whole
+      application was unmeasured while every test executed it), and a `fail_under = 90` floor is set
+      (measured 95%, `main.py` itself 93%).
+- [x] CI (Reviewer P2-5): `.github/workflows/ci.yml` runs `scripts/check.ps1` on every push to `main`
+      and every pull request - the gate existed but nothing ran it, which is how 1416 passing tests
+      coexisted with a guard that refused the product's own headline question. Coverage is now part
+      of the gate on both sides, not an optional extra.
+
 **Scheduled** (severity order; one round per commit):
 
-- [ ] P1-07 (Reviewer P1-7) — dead and value-blind frontend assertions, no frontend coverage
-      tooling, no CI. Round 5
 - [ ] Round 6 — documentation: the WRONG/drift items in `PROJECT_HANDOFF.md`, and committing the
       handoff + reviewer report
 
@@ -145,11 +168,13 @@ independent defect register is `Reviewer Report.md`.
 
 | Gate | Result |
 | --- | --- |
-| `scripts/check.ps1` (ruff, mypy, pytest, tsc, eslint, vitest, secret scan) | **exit 0** |
+| `scripts/check.ps1` (ruff, mypy, pytest+cov, tsc, eslint, vitest+cov, secret scan) | **exit 0** |
 | Backend `pytest -q` | **1475 passed, 1 skipped** (started at 1415/1) |
-| Backend coverage `--cov=app` | **95%** (4128 statements, 214 missed); `app/ai/llm.py` **84% → 98%** |
+| Backend coverage `--cov=app` | **95%** (4213 statements, 215 missed), floor 90 enforced; `app/main.py` now measured (93%); `app/ai/llm.py` 84% → 98% |
 | Frontend `npm test` | **59 passed** (2 files) |
-| `security`-marked tests | 1067 → re-measured in Round 5 |
+| Frontend coverage | **91.4% statements / 80.4% branches / 74.4% functions**, thresholds 85 / 75 / 70 enforced |
+| `security`-marked tests | **1110** of 1476 collected (was 1067 of 1416) |
+| CI | `.github/workflows/ci.yml` runs the whole gate on push to `main` and on pull requests |
 | `backend/scripts/demo.py` | **71 / 71 checks passed** (was 67; SCENARIO 0 now demonstrates the disclosure boundary and the search limiter) |
 | Disclosure boundary (live) | anonymous `/meta` carries no AI-stack key; anonymous `/chat/capabilities` is 401; rule counts absent for employee, present for security |
 | `/knowledge/search` throttle (live) | 30 rapid searches → 20 × 200, then 429 from request 21 (same budget as chat, separate key) |
@@ -160,7 +185,7 @@ independent defect register is `Reviewer Report.md`.
 | Escalation corpus | **52 / 52** S1/S2 phrasings escalate; 20 legitimate questions do not |
 | Injection corpus | **31 / 31** blocked; 12 document requests + 3 reported requests not blocked |
 | Config drift guard | code default == `.env.example` == README settings table, for the six published defaults |
-| `scripts/check-no-secrets.ps1` | OK, 175 files, all required assets present |
+| `scripts/check-no-secrets.ps1` | OK, all required assets present |
 
 **Repository conventions learned the hard way** (this round): never round-trip `README.md` or
 `docs/DEMO.md` through PowerShell `Get-Content`/`Set-Content` — on Windows PowerShell 5.1 it reads

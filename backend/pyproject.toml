@@ -58,11 +58,19 @@ check_untyped_defs = false
 # ------------------------------------------------------------ coverage -----
 [tool.coverage.run]
 source = ["app"]
-omit = ["app/main.py", "*/__init__.py"]
+# `app/main.py` used to be omitted, which meant the one module that wires the whole
+# application - the lifespan, the seeding, the service construction - was never
+# measured even though every test executes it through `TestClient`. Excluding a
+# module from measurement because it is "just wiring" is how wiring breaks silently.
+omit = ["*/__init__.py"]
 
 [tool.coverage.report]
 show_missing = true
 skip_covered = true
+# A floor, not a target: measured 95% when this was set. It exists so that deleting
+# tests without deleting code fails the gate instead of quietly reducing a number
+# nobody looks at.
+fail_under = 90
 exclude_lines = [
     "pragma: no cover",
     "if TYPE_CHECKING:",

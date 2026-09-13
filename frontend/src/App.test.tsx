@@ -308,7 +308,10 @@ describe('chat workspace', () => {
     const bar = screen.getByRole('banner')
     expect(within(bar).getByText('Employee')).toBeInTheDocument()
     expect(within(bar).getByText('Alice Chen (Employee)')).toBeInTheDocument()
-    expect(within(bar).getByText(/7/)).toBeInTheDocument()
+    // The count itself, not "any text containing a 7": a KB-007 citation, a build
+    // string or a timestamp used to satisfy the old `/7/` matcher while the number
+    // the user is being shown could have been anything at all.
+    expect(within(bar).getByText('7', { selector: 'strong' })).toBeInTheDocument()
   })
 
   it('renders an answer with its citations and recommended actions', async () => {
@@ -327,7 +330,15 @@ describe('chat workspace', () => {
     )
     await user.click(screen.getByRole('button', { name: /^send$/i }))
 
-    expect((await screen.findAllByText(/at least 14 characters long/i)).length).toBeGreaterThan(0)
+    // `findAllBy*` rejects when nothing matches, so the old
+    // `expect(...length).toBeGreaterThan(0)` could never fail - the await was doing
+    // the work and the assertion was decoration. What matters is *where* the text
+    // appears: in the answer body, not only in the citation snippet beside it.
+    const answer = (await screen.findByText('Security Assistant')).closest('.bubble') as HTMLElement
+    const body = answer.querySelector('.bubble__body') as HTMLElement
+    expect(body).not.toBeNull()
+    // In the answer body itself, not only in the citation snippet beside it.
+    expect(within(body).getAllByText(/at least 14 characters long/i).length).toBeGreaterThanOrEqual(1)
     expect(screen.getByRole('heading', { name: /recommended actions/i })).toBeInTheDocument()
     expect(screen.getByLabelText(/sources/i)).toBeInTheDocument()
     expect(screen.getByText('KB-001')).toBeInTheDocument()
@@ -405,8 +416,11 @@ describe('chat workspace', () => {
 
     await user.click(screen.getByRole('button', { name: /^Password question/ }))
 
-    // The phrase appears both in the answer body and in the source snippet.
-    expect((await screen.findAllByText(/at least 14 characters long/i)).length).toBeGreaterThan(0)
+    // The phrase appears both in the answer body and in the source snippet, so the
+    // count is asserted rather than merely awaited - a vacuous assertion here once
+    // proved nothing at all.
+    const rendered = await screen.findAllByText(/at least 14 characters long/i)
+    expect(rendered.length).toBeGreaterThanOrEqual(1)
     expect(screen.getByText(/what are the company password requirements\?/i)).toBeInTheDocument()
   })
 
@@ -548,8 +562,15 @@ describe('chat workspace', () => {
   it('never offers a role switcher in the client', async () => {
     await signedIn()
     // Authorization is a backend concern; the UI must not present a control that
-    // looks like it could change the caller's role.
+    // looks like it could change the caller's role. Checking only for a `combobox`
+    // let a button- or link-based switcher through - which is the shape the control
+    // would most plausibly take - so every control role is checked now.
     expect(screen.queryByRole('combobox')).not.toBeInTheDocument()
+    expect(screen.queryByRole('listbox')).not.toBeInTheDocument()
+    for (const name of [/act as/i, /switch role/i, /change role/i, /role:/i, /sign in as (?!employee)/i]) {
+      expect(screen.queryByRole('button', { name })).not.toBeInTheDocument()
+      expect(screen.queryByRole('link', { name })).not.toBeInTheDocument()
+    }
   })
 
   it('shows an error when the conversation list cannot be loaded', async () => {
@@ -643,6 +664,15 @@ describe('tickets', () => {
     await openTickets()
     await screen.findByText('SEC-2026-0007')
     expect(screen.getByText('Needs a human')).toBeInTheDocument()
+    // The *number*, bound to its label. Asserting only that the label rendered made
+    // this test pass with every statistic showing 0 or NaN - it was measuring the
+    // presence of a <dt>, not that the queue was being counted. The fixture has
+    // open: 0 and requiring_human: 1, so the two rows cannot be confused.
+    const list = screen.getByLabelText(/^tickets$/i)
+    const openRow = within(list).getByText('Open').closest('div') as HTMLElement
+    expect(openRow).toHaveTextContent('0')
+    const humanRow = within(list).getByText('Needs a human').closest('div') as HTMLElement
+    expect(humanRow).toHaveTextContent('1')
   })
 
   it('opens a ticket with its timeline and assessment', async () => {
@@ -1035,6 +1065,26 @@ describe('dashboard', () => {
     expect(screen.getByText(/^intents$/i)).toBeInTheDocument()
     expect(screen.getByText(/^ticket status$/i)).toBeInTheDocument()
     expect(screen.getByText(/refusals by role/i)).toBeInTheDocument()
+
+    // The *values*, not just the card titles. This test used to pass with every
+    // distribution mapping to NaN and the daily series empty: it was asserting that
+    // five static headings existed. The fixture's numbers are asserted per card, and
+    // the two days it carries must actually render.
+    const riskCard = screen.getByText(/risk levels/i).closest('.dash-card') as HTMLElement
+    expect(within(riskCard).getByText('4')).toBeInTheDocument()
+    const intentCard = screen.getByText(/^intents$/i).closest('.dash-card') as HTMLElement
+    expect(within(intentCard).getByText('3')).toBeInTheDocument()
+    const statusCard = screen.getByText(/^ticket status$/i).closest('.dash-card') as HTMLElement
+    expect(within(statusCard).getByText('2')).toBeInTheDocument()
+    const denialCard = screen.getByText(/refusals by role/i).closest('.dash-card') as HTMLElement
+    expect(within(denialCard).getByText('2')).toBeInTheDocument()
+
+    // The daily series: each day is labelled and carries the values in its tooltip,
+    // so an empty series cannot pass.
+    const activity = screen.getByLabelText(/questions per day/i)
+    expect(within(activity).getByText('03-01')).toBeInTheDocument()
+    expect(within(activity).getByText('03-02')).toBeInTheDocument()
+    expect(within(activity).getByTitle(/2024-03-02: 5 questions, 1 escalations/)).toBeInTheDocument()
   })
 
   it('lists the most viewed and refused documents', async () => {

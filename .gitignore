@@ -29,6 +29,8 @@ coverage.xml
 node_modules/
 frontend/dist/
 frontend/.vite/
+# vitest --coverage output (the report, not a source of truth)
+frontend/coverage/
 *.tsbuildinfo
 npm-debug.log*
 yarn-error.log*

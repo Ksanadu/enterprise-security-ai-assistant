@@ -901,14 +901,26 @@ summary: 40 questions | intent 40/40 | risk 40/40 | retrieval 40/40 | escalation
 ### One-shot quality gates
 
 ```powershell
-# ruff + mypy + pytest + tsc + eslint + vitest + the secret/ignore check
-powershell -NoProfile -ExecutionPolicy Bypass -File scripts/check.ps1
+# ruff + mypy + pytest (coverage floor) + tsc + eslint + vitest (coverage
+# thresholds) + the secret/ignore check, in that order
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts\check.ps1
 
 # repository hygiene only
-powershell -NoProfile -ExecutionPolicy Bypass -File scripts/check-no-secrets.ps1
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts\check-no-secrets.ps1
 ```
 
-Both exit non-zero on the first failing gate, so they can be wired into CI unchanged.
+Both exit non-zero on the first failing gate. Coverage is part of the gate rather
+than an optional extra: the backend has a `fail_under` floor in `pyproject.toml`
+and the frontend has statement/branch/function thresholds in `vite.config.ts`, so
+deleting tests without deleting code fails the build instead of quietly reducing a
+number nobody looks at.
+
+`.github/workflows/ci.yml` runs exactly this gate (on Windows, because the scripts
+and paths are Windows-first) for every push to `main` and every pull request. It
+installs the toolchain and calls `check.ps1`, so the pipeline and a developer's
+local gate cannot drift apart. Before this workflow existed, 1416 tests passed on
+every commit while the prompt guard refused the product's own headline question,
+which is the argument for a pipeline in one sentence.
 
 ---
 
