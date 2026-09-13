@@ -18,6 +18,12 @@ from app.core.config import (
     generate_secret_key,
 )
 
+#: The guardrails below are security controls: they are what stops an unsafe
+#: configuration from starting at all, and what keeps a secret out of a payload
+#: that anyone can read. Marked so ``pytest -m security`` includes them - a
+#: security subset that omits the production guardrails is not a gate.
+pytestmark = pytest.mark.security
+
 SAFE_SECRET = "a" * 48
 
 

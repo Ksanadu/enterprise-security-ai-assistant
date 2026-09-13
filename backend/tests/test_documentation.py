@@ -291,11 +291,29 @@ class TestTheStructuredOutputMatchesTheSpecification:
 
 class TestTheReadmeIsInternallyConsistent:
     def test_the_backend_test_count_is_the_same_everywhere_it_appears(self) -> None:
-        # It appears in the overview, the repository layout and the testing
-        # section; a partial update leaves contradictory numbers behind.
+        """The four places that state the *current* total must agree.
+
+        The README also records what each phase ended with ("520 backend tests +
+        28 frontend tests"), and those numbers are meant to differ - they are a
+        history, not a contradiction. So this anchors on the four patterns that
+        state the total today rather than on any line containing a number.
+        """
         text = README.read_text(encoding="utf-8")
-        counts = set(re.findall(r"(\d{4}) (?:backend )?tests", text))
-        assert len(counts) == 1, f"README states more than one backend test count: {sorted(counts)}"
+        patterns = {
+            "overview": r"\* (\d{3,}) backend tests, \*\*\d+% statement coverage\*\*",
+            "repository layout": r"tests/ +# (\d{3,}) tests",
+            "testing table": r"\| Unit and integration \((\d{3,}) tests\)",
+            "command comment": r"# backend: (\d{3,}) tests,",
+        }
+
+        found: dict[str, str] = {}
+        for label, pattern in patterns.items():
+            match = re.search(pattern, text)
+            assert match, f"README no longer states the backend test count in the {label}"
+            found[label] = match.group(1)
+
+        assert len(set(found.values())) == 1, f"contradictory totals: {found}"
+        del found
 
     def test_the_coverage_figure_is_consistent(self) -> None:
         text = README.read_text(encoding="utf-8")
