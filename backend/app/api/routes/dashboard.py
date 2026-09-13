@@ -165,11 +165,17 @@ def audit_log(
     days: WindowDays = DEFAULT_WINDOW_DAYS,
     limit: Annotated[int, Query(ge=1, le=200)] = 50,
     offset: Annotated[int, Query(ge=0)] = 0,
+    before_id: Annotated[int | None, Query(ge=1)] = None,
 ) -> AuditLogResponse:
     """Metadata-only search over the audit trail.
 
     The stored ``detail`` blob is represented by its key names rather than its
     values, so this endpoint cannot become a bulk export of application data.
+
+    Page with ``before_id`` rather than ``offset``. Reading this endpoint appends
+    a ``dashboard.viewed`` row, so an offset window moves between requests: page 2
+    would repeat the last entry of page 1. ``before_id`` anchors the window to a
+    row id instead, which only ever grows.
     """
     service = get_dashboard_service(request)
     _note_view(request, session, user, "audit")
@@ -182,6 +188,7 @@ def audit_log(
             since_days=days,
             limit=limit,
             offset=offset,
+            before_id=before_id,
         ),
     )
     return AuditLogResponse(**result)

@@ -243,7 +243,13 @@ export const api = {
     overview: (days: number, options?: RequestOptions) =>
       apiRequest<DashboardOverview>(`/dashboard/overview?days=${days}`, options),
     audit: (
-      params: { action?: string; outcome?: string; actor_role?: string; limit?: number },
+      params: {
+        action?: string
+        outcome?: string
+        actor_role?: string
+        limit?: number
+        before_id?: number
+      },
       options?: RequestOptions,
     ) => {
       const query = new URLSearchParams()

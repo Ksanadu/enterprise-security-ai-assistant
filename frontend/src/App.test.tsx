@@ -970,6 +970,7 @@ describe('dashboard', () => {
     total: 1,
     returned: 1,
     offset: 0,
+    next_before_id: null,
     entries: [
       {
         id: 42,

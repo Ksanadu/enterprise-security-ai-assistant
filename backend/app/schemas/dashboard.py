@@ -88,9 +88,19 @@ class AuditEntry(BaseModel):
 
 
 class AuditLogResponse(BaseModel):
+    """One page of the audit trail.
+
+    ``next_before_id`` is the cursor for the following page. Prefer it over
+    ``offset``: the trail is append-only *and* reading it appends a
+    ``dashboard.viewed`` row, so an offset window shifts under the reader - page
+    2 repeats the last row of page 1, and under load it can skip rows entirely.
+    Paging by id is stable because ids only ever grow.
+    """
+
     total: int
     returned: int
     offset: int
+    next_before_id: int | None = None
     entries: list[AuditEntry] = Field(default_factory=list)
 
 

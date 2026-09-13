@@ -8,8 +8,10 @@ export interface DashboardProps {
   days: number
   actionFilter: string
   loading: boolean
+  loadingMoreAudit: boolean
   onDaysChange: (days: number) => void
   onActionChange: (action: string) => void
+  onLoadMoreAudit: () => void
 }
 
 function formatSeconds(value: number | null): string {
@@ -70,8 +72,10 @@ export function Dashboard({
   days,
   actionFilter,
   loading,
+  loadingMoreAudit,
   onDaysChange,
   onActionChange,
+  onLoadMoreAudit,
 }: DashboardProps) {
   if (overview === null) {
     return (
@@ -292,10 +296,22 @@ export function Dashboard({
           </table>
         )}
         <p className="dash-card__hint">
-          Showing {audit?.returned ?? 0} of {audit?.total ?? 0} entries. Audit detail is recorded
+          Showing {audit?.entries.length ?? 0} of {audit?.total ?? 0} entries. Audit detail is recorded
           as metadata only; the dashboard shows counts and identifiers, never conversation
           content.
         </p>
+
+        {audit?.next_before_id != null && (
+          <button
+            type="button"
+            className="button button--ghost"
+            onClick={onLoadMoreAudit}
+            disabled={loadingMoreAudit}
+            aria-busy={loadingMoreAudit}
+          >
+            {loadingMoreAudit ? 'Loading…' : 'Load more entries'}
+          </button>
+        )}
       </section>
     </div>
   )

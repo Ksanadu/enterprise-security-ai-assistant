@@ -15,6 +15,10 @@ export interface UseDashboardResult {
   error: string | null
   refresh: () => Promise<void>
   loadAudit: () => Promise<void>
+  /** Append the next page of the audit trail using the server's id cursor. */
+  loadMoreAudit: () => Promise<void>
+  /** True while a further audit page is being fetched. */
+  loadingMoreAudit: boolean
   dismissError: () => void
 }
 
@@ -33,6 +37,7 @@ export function useDashboard(onUnauthorized: () => void, enabled: boolean): UseD
   const [days, setDays] = useState<number>(14)
   const [actionFilter, setActionFilter] = useState('')
   const [loading, setLoading] = useState(false)
+  const [loadingMoreAudit, setLoadingMoreAudit] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
   const handleFailure = useCallback(
@@ -87,6 +92,31 @@ export function useDashboard(onUnauthorized: () => void, enabled: boolean): UseD
 
   const dismissError = useCallback(() => setError(null), [])
 
+  const loadMoreAudit = useCallback(async () => {
+    const cursor = audit?.next_before_id
+    if (cursor == null) return
+    setLoadingMoreAudit(true)
+    setError(null)
+    try {
+      const next = await api.dashboard.audit({
+        action: actionFilter,
+        limit: 50,
+        before_id: cursor,
+      })
+      // Append rather than replace, and keep the *original* total so the
+      // "showing X of Y" line does not drift as pages are added.
+      setAudit((previous) =>
+        previous === null
+          ? next
+          : { ...next, total: previous.total, entries: [...previous.entries, ...next.entries] },
+      )
+    } catch (cause) {
+      handleFailure(cause, 'Could not load more audit entries.')
+    } finally {
+      setLoadingMoreAudit(false)
+    }
+  }, [actionFilter, audit, handleFailure])
+
   return {
     overview,
     audit,
@@ -99,6 +129,8 @@ export function useDashboard(onUnauthorized: () => void, enabled: boolean): UseD
     error,
     refresh,
     loadAudit,
+    loadMoreAudit,
+    loadingMoreAudit,
     dismissError,
   }
 }

@@ -225,6 +225,12 @@ field nobody reads is not an answer.
   busiest audit actions - all in SQL, with zero-count buckets filled in.
 * **Audit search** by action, role and outcome. The stored `detail` blob is represented by its
   **key names**, not its values, so the endpoint cannot become a bulk export.
+* **Audit paging is by id cursor, not by offset.** Reading the audit trail appends a
+  `dashboard.viewed` row, so an offset window moves under the reader: page 2 repeats the last
+  entry of page 1, and under load it can skip entries entirely. On an append-only log whose whole
+  purpose is completeness, that is a real defect - so `before_id` anchors the window to a row id
+  and the UI has a "Load more" control that walks the trail without duplicates. A test pins both
+  the defect and the fix, so the reason the cursor exists stays documented.
 * **Document access** reporting: which documents were read most, which reads were refused, and
   refusals broken down by role.
 * **Schema-drift guard**: this project has no migration tool and `create_all` never alters an
@@ -249,9 +255,9 @@ field nobody reads is not an answer.
   dashboard, triage it, and check the audit trail - all through HTTP.
 * **Cross-role consistency**: the same question asked by all three roles must produce an
   identical classification and identical escalation, while retrieval differs and stays in scope.
-* **911 security-marked tests** covering RBAC, injection, leakage, session handling, ticket
+* **961 security-marked tests** covering RBAC, injection, leakage, session handling, ticket
   scoping, redaction and the deployment assets, runnable as one suite with `pytest -m security`.
-* 1281 backend tests, **94% statement coverage**; `ruff`, `mypy`, `tsc` and `eslint` clean.
+* 1331 backend tests, **94% statement coverage**; `ruff`, `mypy`, `tsc` and `eslint` clean.
 
 The set immediately earned its keep. Writing it exposed a set of real defects:
 
@@ -410,7 +416,7 @@ stale cached index). A mismatch is logged as a security event and the chunk is d
 │   ├── scripts/
 │   │   ├── demo.py               # the executable demonstration (67 checks)
 │   │   └── update_evaluation_expectations.py
-│   ├── tests/                    # 1281 tests
+│   ├── tests/                    # 1331 tests
 │   └── requirements*.txt
 ├── frontend/
 │   ├── Dockerfile                # Vite build stage → nginx runtime stage
@@ -715,12 +721,12 @@ The suite has three layers:
 
 | Layer | What it covers | How to run |
 | ----- | -------------- | ---------- |
-| Unit and integration (1281 tests) | Every module: config guards, ORM, RAG, classifiers, services, API, deployment assets | `pytest -q` |
-| Security (911 tests) | RBAC, injection, leakage, sessions, ticket scoping, redaction, deployment hardening | `pytest -m security` |
+| Unit and integration (1331 tests) | Every module: config guards, ORM, RAG, classifiers, services, API, deployment assets | `pytest -q` |
+| Security (961 tests) | RBAC, injection, leakage, sessions, ticket scoping, redaction, deployment hardening | `pytest -m security` |
 | Evaluation (61 tests) | The 40-question set and the end-to-end demo walkthrough | `pytest -m evaluation` |
 
 ```powershell
-# backend: 1281 tests, 94% statement coverage
+# backend: 1331 tests, 94% statement coverage
 cd backend
 .\.venv\Scripts\python.exe -m pytest -q
 .\.venv\Scripts\python.exe -m pytest -m security -q          # security subset

@@ -83,6 +83,9 @@ class AuditQuery:
     since_days: int = DEFAULT_WINDOW_DAYS
     limit: int = DEFAULT_PAGE_SIZE
     offset: int = 0
+    #: Keyset cursor: return rows with ``id`` below this. Stable where ``offset``
+    #: is not, because the audit trail grows while it is being read.
+    before_id: int | None = None
 
 
 class DashboardService:
@@ -405,21 +408,33 @@ class DashboardService:
         if query.outcome:
             conditions.append(AuditLog.outcome == query.outcome)
 
-        statement = statement.where(*conditions)
-        counter = counter.where(*conditions)
+        page_size = max(1, min(query.limit, MAX_PAGE_SIZE))
 
-        total = int(session.scalar(counter) or 0)
-        rows = session.scalars(
-            statement.order_by(AuditLog.id.desc())
-            .limit(max(1, min(query.limit, MAX_PAGE_SIZE)))
-            .offset(max(0, query.offset))
-        ).all()
+        if query.before_id is not None:
+            # Keyset paging: the window is anchored to a row, not to a count, so
+            # rows appended between requests cannot shift it.
+            conditions.append(AuditLog.id < query.before_id)
+            statement = statement.where(*conditions).order_by(AuditLog.id.desc()).limit(page_size)
+            rows = session.scalars(statement).all()
+            total = int(session.scalar(counter.where(AuditLog.id < query.before_id)) or 0)
+        else:
+            statement = statement.where(*conditions)
+            counter = counter.where(*conditions)
+            total = int(session.scalar(counter) or 0)
+            rows = session.scalars(
+                statement.order_by(AuditLog.id.desc())
+                .limit(page_size)
+                .offset(max(0, query.offset))
+            ).all()
 
+        entries = [self._entry(row) for row in rows]
         return {
             "total": total,
             "returned": len(rows),
             "offset": query.offset,
-            "entries": [self._entry(row) for row in rows],
+            # The cursor for the next page, or None once the trail is exhausted.
+            "next_before_id": rows[-1].id if len(rows) == page_size else None,
+            "entries": entries,
         }
 
     @staticmethod

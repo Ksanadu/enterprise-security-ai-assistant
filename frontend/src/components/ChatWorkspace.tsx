@@ -194,8 +194,10 @@ export function ChatWorkspace({ user, onSignOut, maxMessageLength = 2000 }: Chat
             days={dashboard.days}
             actionFilter={dashboard.actionFilter}
             loading={dashboard.loading}
+            loadingMoreAudit={dashboard.loadingMoreAudit}
             onDaysChange={dashboard.setDays}
             onActionChange={dashboard.setActionFilter}
+            onLoadMoreAudit={() => void dashboard.loadMoreAudit()}
           />
         </main>
       )}

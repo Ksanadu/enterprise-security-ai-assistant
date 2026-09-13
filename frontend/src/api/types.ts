@@ -268,6 +268,14 @@ export interface AuditLogPage {
   total: number
   returned: number
   offset: number
+  /**
+   * Cursor for the next page, or null once the trail is exhausted.
+   *
+   * The audit trail is append-only and reading it appends a `dashboard.viewed`
+   * row, so paging by `offset` repeats the last entry of the previous page.
+   * Paging by id is stable because ids only grow.
+   */
+  next_before_id: number | null
   entries: AuditEntry[]
 }
 
