@@ -1,6 +1,9 @@
 # PROJECT STATUS — Enterprise Security AI Assistant
 
-**Current Phase:** Stabilization (defect repair, no new features)
+**Current Phase:** Stabilization — **complete**. Every confirmed defect from `Reviewer Report.md`
+and `PROJECT_HANDOFF.md` §8.1 has been fixed, verified and committed in six rounds. The project is
+back to a green gate; what is left (see "What remains") is the honest limits of the verification
+and normal product evolution rather than repair.
 This file is the running state of the project. It is updated at the end of every work
 round, in the same commit as the change it describes. The requirements authority is
 `PRODUCT_SPEC.md`; the inherited engineering record is `PROJECT_HANDOFF.md`; the
@@ -29,7 +32,7 @@ independent defect register is `Reviewer Report.md`.
 - [x] `PROJECT_HANDOFF.md` claims checked against the repository (13 inconsistencies found;
       documentation repairs are scheduled as Round 6)
 
-## Current
+## Rounds — what was fixed, and the evidence
 
 **Round 1 — the silent-drop family — DONE**
 
@@ -144,10 +147,38 @@ independent defect register is `Reviewer Report.md`.
       coexisted with a guard that refused the product's own headline question. Coverage is now part
       of the gate on both sides, not an optional extra.
 
-**Scheduled** (severity order; one round per commit):
+**Round 6 — the documents that were wrong — DONE**
 
-- [ ] Round 6 — documentation: the WRONG/drift items in `PROJECT_HANDOFF.md`, and committing the
-      handoff + reviewer report
+- [x] `PROJECT_HANDOFF.md` audited claim by claim against the repository and corrected in place.
+      Thirteen statements were wrong or stale; the two that mattered most were **validations that
+      did not exist** (§5.5 claimed a Compose-specification JSON-schema check and an
+      nginx-equivalent bundle check — neither is implemented anywhere), and §8.2 claimed sessions
+      live in memory when they have been server-side rows all along. Also corrected: the gate's
+      step order and content, the evaluation set's graded count (28, not 29), the settings count
+      (50 fields, 48 documented), the demo check count, the `VITE_*` count, the seeding (three demo
+      tickets as well as four users), the chunk count's dependence on chunker settings, and every
+      test/coverage figure.
+- [x] §8.1's bug register is marked **closed** with the fix and the round recorded, and §10.4 no
+      longer lists BUG-1/BUG-2 as open. The analysis is kept as the record of what was wrong.
+- [x] `PROJECT_HANDOFF.md` and `Reviewer Report.md` are now **committed** — they were untracked, so
+      a fresh clone did not contain the handoff or the review it responds to.
+
+## What remains
+
+Not defects in the code - the confirmed defect list is empty - but the honest limits:
+
+- [ ] **Acceptance criterion §9.10 is the only unproven one**: `docker compose up` has never run
+      (no container runtime on the development machine). Everything else is verified by execution.
+- [ ] Answer quality against a real provider is unmeasured (the *request path* is now tested; the
+      prose is not). `LLM_PROVIDER=openai_compatible` switches it.
+- [ ] P2/P3 improvements from the review, none of them repaired here because they are not defects:
+      Alembic migrations, a shared rate-limit store (the limiter is still per-process), CI coverage
+      publishing, audit retention policy, streaming responses, i18n, semantic embeddings by default.
+
+## Current Phase
+
+**Stabilization — complete.** The list above is the record; this file is updated at the end of
+every round, in the same commit as the change it describes.
 
 **Decisions taken** (previously open questions):
 
