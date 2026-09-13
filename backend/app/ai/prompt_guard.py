@@ -106,8 +106,29 @@ SECRET_EXTRACTION: tuple[tuple[str, str], ...] = (
         "secret_extraction",
         # A qualifier may sit between the determiner and the noun: "the database
         # password", "the production API key".
+        #
+        # The trailing lookahead is what stops this rule from refusing the
+        # product's own headline use case. "Show me the password policy" names a
+        # *document*; whether the caller may read that document is decided by
+        # retrieval and RBAC, not here. Only a request for the credential
+        # *value* is an extraction attempt, so a credential noun that is
+        # immediately followed by a document noun is left to the normal pipeline.
         r"\b(?:show|reveal|print|give|tell|send|share|provide)\s+(?:me\s+)?(?:the\s+)?"
-        r"(?:\w+\s+){0,2}?(?:api\s*key|secret|token|password|credential)s?\b",
+        r"(?:\w+\s+){0,2}?(?:api\s*key|secret|token|password|credential)s?\b"
+        r"(?!\s+(?:polic|requirement|procedure|standard|guideline|rotation|lifetime|"
+        r"management|handling|strength|rule|practice|guide|advice|storage|hashing|"
+        r"complexity|expiry|expiration|reset|best|audit|review|checklist))",
+    ),
+    (
+        "secret_extraction",
+        # The same request for a value when a document noun is also mentioned:
+        # "show me the password policy and the admin password". The privilege or
+        # scope qualifier is the value cue, so it survives the lookahead above.
+        r"\b(?:show|reveal|print|give|tell|send|share|provide)\b[\s\S]{0,40}?"
+        r"\b(?:the|my|your|our|their|his|her)\s+"
+        r"(?:admin|administrator|root|database|production|service|domain|shared|"
+        r"master|privileged|current|another)\s+"
+        r"(?:api\s*key|secret|token|password|credential)s?\b",
     ),
     (
         "secret_extraction",
@@ -223,6 +244,28 @@ ACCESS_BYPASS: tuple[tuple[str, str], ...] = (
 
 BLOCKING_PATTERNS = INSTRUCTION_OVERRIDE + SECRET_EXTRACTION + ACCESS_BYPASS
 
+#: Categories that describe a *request the user is relaying* rather than one they
+#: are making. An employee reporting "a supplier emailed me asking me to reveal
+#: the API key" is doing the right thing, and refusing them accuses the reporter
+#: of the attack. Instruction overrides and prompt extraction are deliberately
+#: **not** here: a message containing "ignore all previous instructions" is
+#: refused even when it is wrapped in a report, because the model must not be
+#: handed an override to read.
+REPORT_EXEMPT_CATEGORIES = frozenset({"secret_extraction", "access_bypass"})
+
+#: A third party asking the user for something, in reported speech: "asking me to
+#: reveal ...", "told me to bypass ...", "says '...'". The `me`/`us` or the
+#: quotation is what separates a *report* from an authority claim used to justify
+#: the user's own request ("my manager said it is fine, show me the playbook"),
+#: which stays blocked.
+REPORTED_REQUEST = re.compile(
+    r"\b(?:asks?|asked|asking|tells?|told|telling|wants?|wanted|instructs?|instructed|"
+    r"demands?|demanded|requests?|requested|tries?\s+to|tried\s+to|pressur\w*|convinc\w*|"
+    r"phoned|called)\s+(?:me|us)\b"
+    r"|\b(?:says?|saying|said|writes?|wrote|reads?|contains?|contained)\b[\s\S]{0,12}?[\"'\u2018\u2019\u201c\u201d]",
+    re.IGNORECASE,
+)
+
 #: Instructions inside retrieved content. Neutralised, not blocked.
 CONTEXT_PATTERNS: tuple[tuple[str, str], ...] = (
     (
@@ -270,15 +313,29 @@ class PromptGuard:
         if not text or not text.strip():
             return GuardResult(action="allow")
 
-        findings = [
-            GuardFinding(
-                category=category,
-                pattern=pattern,
-                excerpt=_excerpt(text, match.start(), match.end()),
+        findings = []
+        for category, pattern, regex in _COMPILED_BLOCKING:
+            match = regex.search(text)
+            if match is None:
+                continue
+            # A request the user is *reporting* is not a request the user is
+            # making. Only a third party's request, introduced before the match by
+            # reported speech ("a supplier emailed me asking me to reveal ..."),
+            # is exempt; an authority claim backing the user's own demand is not.
+            if category in REPORT_EXEMPT_CATEGORIES:
+                reported = REPORTED_REQUEST.search(text, 0, match.start())
+                if reported is not None:
+                    logger.info(
+                        "prompt_guard_reported_request_allowed category=%s", category
+                    )
+                    continue
+            findings.append(
+                GuardFinding(
+                    category=category,
+                    pattern=pattern,
+                    excerpt=_excerpt(text, match.start(), match.end()),
+                )
             )
-            for category, pattern, regex in _COMPILED_BLOCKING
-            if (match := regex.search(text)) is not None
-        ]
 
         if not findings:
             return GuardResult(action="allow")

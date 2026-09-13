@@ -73,11 +73,11 @@ per responsibility, each independently testable and each with its own test file:
 
 | Spec component | Module | Responsibility | Decided by |
 | -------------- | ------ | -------------- | ---------- |
-| Intent Classifier | `app/ai/intent_classifier.py` | 34 rules over 6 intents, optional model refinement | rules (+ model to raise confidence) |
+| Intent Classifier | `app/ai/intent_classifier.py` | 49 rules over 6 intents, optional model refinement | rules (+ model to raise confidence) |
 | Permission Checker | `app/security/rbac.py` | which documents a role may read; which tickets a user may see | **backend code only** |
 | Retriever | `app/rag/retriever.py` | scored, permission-filtered, deduplicated context | backend code |
 | Response Generator | `app/ai/response_generator.py` | grounded answer, recommended actions, citations | model, constrained by retrieved context |
-| Risk Classifier | `app/ai/risk_classifier.py` | 26 rules mapping signals to a risk level | rules (+ model may **raise**, never lower) |
+| Risk Classifier | `app/ai/risk_classifier.py` | 39 rules mapping signals to a risk level | rules (+ model may **raise**, never lower) |
 | Workflow Manager | `app/services/workflow_manager.py` | escalate? create ticket? notify whom? | **backend code only** |
 
 The prompt guard (`app/ai/prompt_guard.py`) runs before any of them and can refuse the turn outright.

@@ -152,6 +152,37 @@ RISK_RULES: tuple[tuple[RiskLevel, str, str], ...] = (
         r"\b(?:external|outside|personal|private|unapproved|unauthori[sz]ed|third[\s-]party|"
         r"cloud\s+drive|dropbox|usb|removable)",
     ),
+    # Data loss reported as a *loss* rather than as a leak: "We lost 500 customer
+    # records to an attacker." KB-009 puts confirmed data loss at S1, and this is
+    # how a breach is usually described out loud. It matched nothing, fell to
+    # `out_of_scope`, and produced no ticket and no escalation.
+    (
+        RiskLevel.CRITICAL,
+        "data_exfiltration",
+        r"\b(?:lost|missing|gone)\b[\s\S]{0,30}?"
+        r"\b(?:customer\s+)?(?:data|records?|files?|documents?|database|customers?)\b"
+        r"[\s\S]{0,30}?\b(?:to|from)\b[\s\S]{0,15}?"
+        r"\b(?:an?\s+)?(?:attacker|hacker|thief|criminal|outsider|third[\s-]party)\b"
+        # The same event with the loss after the noun: "500 customer records are
+        # missing and we think an attacker took them."
+        r"|\b(?:customer\s+)?(?:data|records?|files?|documents?|database|customers?)\b"
+        r"[\s\S]{0,25}?\b(?:are|is|were|was|went)\s+(?:missing|lost|gone|stolen)\b"
+        r"[\s\S]{0,40}?\b(?:attacker|hacker|thief|criminal|outsider|third[\s-]party)\b",
+    ),
+    # KB-009: "Malware on a server, or on more than three endpoints" is S1 - a
+    # different severity from malware on one endpoint, which is why the two rules
+    # are separate rather than one broad "malware" match.
+    (
+        RiskLevel.CRITICAL,
+        "malware_on_server",
+        r"\b(?:malware|virus|ransomware|trojan|rootkit|keylogger|spyware|backdoor)\b"
+        r"[\s\S]{0,40}?\b(?:on|running\s+on|installed\s+on|infect(?:ed|ing))\b[\s\S]{0,20}?"
+        r"\bservers?\b"
+        r"|\b(?:strange|odd|unusual|unknown|suspicious|rogue)\s+process\b[\s\S]{0,40}?"
+        r"\b(?:on|running\s+on)\b[\s\S]{0,20}?\bservers?\b"
+        r"|\b(?:more\s+than\s+three|four|five|several|\d{2,})\b[\s\S]{0,20}?\bendpoints?\b"
+        r"[\s\S]{0,40}?\b(?:malware|infected|compromised)\b",
+    ),
     (
         RiskLevel.CRITICAL,
         "multiple_systems",
@@ -308,11 +339,52 @@ RISK_RULES: tuple[tuple[RiskLevel, str, str], ...] = (
     (
         RiskLevel.HIGH,
         "account_takeover",
-        # Any possessive: an IT agent reports "a user's mailbox", not "my mailbox".
-        r"\b(?:someone|somebody)\s+(?:else\s+)?(?:has\s+|got\s+|gained\s+)?(?:access|logged\s+in|signed\s+in)\s+to\s+"
-        r"(?:my\s+|your\s+|their\s+|his\s+|her\s+|our\s+|the\s+|a\s+user'?s?\s+)?(?:account|mailbox|e-?mail|inbox)\b",
+        # KB-009 rates "confirmed compromise of one account" S2, and a suspected
+        # compromise is escalated rather than explained away (the error direction
+        # is deliberate: under-escalation is the expensive mistake).
+        #
+        # Three readings are matched separately, because collapsing them is what
+        # made this rule blind. The **noun** `access` takes "to" ("has access to
+        # my account"); the **verb** `accessed` does not ("accessed my account"),
+        # so requiring `\s+to\s+` made that phrasing unmatchable even after the
+        # modal was removed - a grammar bug, not a coverage gap. An optional modal
+        # is tolerated throughout ("may have accessed").
+        r"\b(?:someone|somebody|another\s+person)\b[\s\S]{0,25}?\baccess\b[\s\S]{0,15}?\bto\b"
+        r"[\s\S]{0,30}?\b(?:my|your|their|his|her|our|the|a\s+user'?s?)\s*"
+        r"(?:account|mailbox|e-?mail|inbox)\b"
+        # Verb reading - "accessed", "logged into", "signed in", "read my email".
+        r"|\b(?:someone|somebody|another\s+person)\b[\s\S]{0,45}?"
+        r"\b(?:access(?:ed|ing)?|logg?(?:ed|ing)?\s*(?:in|into|on)|"
+        r"sign(?:ed|ing)?\s*(?:in|into)|read(?:ing)?|us(?:ed|ing))\b[\s\S]{0,30}?"
+        r"\b(?:my|your|their|his|her|our|the|a\s+user'?s?)\s*"
+        r"(?:account|mailbox|e-?mail|inbox)\b"
+        # Passive with an actor: "My account was accessed by somebody else."
+        r"|\b(?:my|our|the)\s+(?:account|mailbox|e-?mail|inbox)\b[\s\S]{0,40}?"
+        r"\b(?:was|were|has\s+been|have\s+been)\s+(?:accessed|hacked|compromised|"
+        r"breached|taken\s+over)\b[\s\S]{0,20}?"
+        r"\b(?:by\s+(?:someone|somebody|another\s+person|an?\s+attacker|a\s+stranger)|"
+        r"someone|somebody|else)\b"
+        # Sign-in activity on the user's own account that they deny: an access they
+        # did not perform is S2, where a merely unusual *location* is S3 (medium).
+        r"|\blogins?\b[\s\S]{0,45}?\b(?:i\s+do\s+not|i\s+don'?t|not\s+mine|"
+        r"i\s+did\s+not|i\s+didn'?t)\b",
     ),
     (RiskLevel.HIGH, "unauthorised_access", r"\bunauthoris?zed\s+(?:access|login|sign[\s-]?in)\b"),
+    # KB-009 S2: "Malware execution on one endpoint". The wording requires a
+    # detection or installation verb, because a bare noun is a *question* - a rule
+    # matching bare "malware" once escalated "What is the malware response
+    # procedure?" (handoff section 11.2). "Someone installed a keylogger on my
+    # machine" scored only medium before this rule existed.
+    (
+        RiskLevel.HIGH,
+        "malware_installed_on_endpoint",
+        r"\b(?:installed|installing|found|detected|discovered|running|running\s+on|"
+        r"there\s+is|there\s+are|saw|seeing|spotted)\b[\s\S]{0,30}?"
+        r"\b(?:keylogger|spyware|trojan|rootkit|backdoor|malware|virus|coin\s?miner)\b"
+        r"|\b(?:keylogger|spyware|trojan|rootkit|backdoor)\b[\s\S]{0,30}?"
+        r"\b(?:on|in)\b[\s\S]{0,15}?\b(?:my|the|our)\s+"
+        r"(?:laptop|machine|computer|pc|workstation|endpoint|device|phone)\b",
+    ),
     # KB-009 "malicious attachment executed on one endpoint" is S2. People
     # describe the effect - something ran, installed, or a macro fired - not the
     # classification, so the execution is matched as well as the label.
@@ -381,6 +453,18 @@ RISK_RULES: tuple[tuple[RiskLevel, str, str], ...] = (
         RiskLevel.MEDIUM,
         "unexpected_behaviour",
         r"\b(?:something|that)\s+(?:seems?|looks?|feels?)\s+(?:wrong|odd|off|strange)\b",
+    ),
+    # KB-009 rates an impossible-travel sign-in S3 on its own and S2 only "unless
+    # followed by data access", so an account anomaly with no actor is tracked and
+    # asked about rather than escalated to a person. The medium tier is where the
+    # questions that settle it are asked.
+    (
+        RiskLevel.MEDIUM,
+        "account_activity_anomaly",
+        r"\b(?:my|our|the)\s+(?:account|mailbox|e-?mail)\b[\s\S]{0,40}?"
+        r"\b(?:was|were)\s+accessed\s+from\b"
+        r"|\b(?:logins?|sign[\s-]?ins?|sessions?)\b[\s\S]{0,40}?"
+        r"\b(?:i\s+do\s+not|i\s+don'?t)\s+recogni[sz]e\b",
     ),
     # --- low --------------------------------------------------------------
     # A report with no interaction. KB-009 classifies "user reports a suspicious

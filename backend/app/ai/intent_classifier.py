@@ -142,9 +142,52 @@ INTENT_RULES: tuple[tuple[Intent, float, str, str], ...] = (
     ),
     (
         Intent.SECURITY_INCIDENT,
-        1.5,
+        2.5,
         "account_taken_over",
-        r"\b(?:someone|somebody)\s+(?:has\s+|got\s+)?(?:access|logged\s+in)\b",
+        # An actor reaching the user's own account, in any tense or mood:
+        # "Someone has access to my account", "Someone may have accessed my
+        # account", "Someone logged into my account", "Somebody else signed in to
+        # my mailbox", "I think someone else has been reading my email".
+        #
+        # Two traps are avoided here. A modal or a hedge ("may have", "I think")
+        # must not stop the match, because a *suspected* compromise is still a
+        # report. And `logged\s+in\b` can never match "logged into": there is no
+        # word boundary between "in" and "to", both being word characters - the
+        # same trap that once left the privileged-account rule dead (handoff
+        # section 11.2). Both phrasings were measured falling to `out_of_scope`,
+        # which also skips retrieval, so a possible account takeover was answered
+        # with "I do not have an approved knowledge document" and nobody was told.
+        r"\b(?:someone|somebody|another\s+person|a\s+stranger)\b[\s\S]{0,45}?"
+        r"\b(?:access(?:ed|es|ing)?|gained|got|has|have|had|logged|logging|signed|"
+        r"signing|reading|read|using|used|sent)\b[\s\S]{0,30}?"
+        # Any possessive, not only the first person: an IT or security agent reports
+        # "a user's mailbox", not "my mailbox".
+        r"\b(?:my|our|your|their|his|her|the|a\s+user'?s?)\s*"
+        r"(?:account|mailbox|e-?mail|inbox|mail)\b",
+    ),
+    (
+        Intent.SECURITY_INCIDENT,
+        2.5,
+        "account_compromised_passive",
+        # The same event reported passively: "My account was accessed by somebody
+        # else", "My account was accessed from another country."
+        r"\b(?:my|our|your|their|his|her|the|a\s+user'?s?)\s*"
+        r"(?:account|mailbox|e-?mail|inbox|mail)\b[\s\S]{0,40}?"
+        r"\b(?:was|were|has\s+been|have\s+been|is|are)\s+"
+        r"(?:accessed|hacked|compromised|breached|used|taken\s+over|locked\s+out)\b",
+    ),
+    (
+        Intent.SECURITY_INCIDENT,
+        2.0,
+        "account_login_anomaly",
+        # Activity on the account the user cannot account for: "There are logins
+        # on my account I do not recognise". KB-009 rates this S3 rather than S2,
+        # so it is tracked and asked about rather than escalated - but it must not
+        # be filed as out of scope either.
+        r"\b(?:logins?|sign[\s-]?ins?|sessions?|devices?)\b[\s\S]{0,30}?"
+        r"\b(?:on|to)\s+my\s+(?:account|mailbox|e-?mail|inbox)\b"
+        r"|\b(?:unrecogni[sz]ed|unexpected|unknown|suspicious)\s+"
+        r"(?:logins?|sign[\s-]?ins?|sessions?|activity|devices?)\b",
     ),
     # The events in KB-009's severity table, described by their *effect* rather
     # than by name. Without these the turn falls through to `out_of_scope`, which
@@ -185,7 +228,37 @@ INTENT_RULES: tuple[tuple[Intent, float, str, str], ...] = (
     ),
     (
         Intent.SECURITY_INCIDENT,
-        1.8,
+        2.5,
+        "malware_detected",
+        # A named malware family, or a process nobody can account for. KB-009 rates
+        # malware on a server S1 and on an endpoint S2, so these reports have to
+        # reach the risk rules instead of falling to `out_of_scope` - which is
+        # exactly what happened to "There is a strange process running on the
+        # server" (answered as a policy question) and "Someone installed a
+        # keylogger on my machine" (answered as a medium-risk incident).
+        r"\b(?:keylogger|spyware|trojan|rootkit|backdoor|botnet|coin\s?miner)\b"
+        r"|\b(?:strange|odd|unusual|unknown|suspicious|rogue)\s+process\b",
+    ),
+    (
+        Intent.SECURITY_INCIDENT,
+        2.0,
+        "data_lost_to_a_third_party",
+        # "We lost 500 customer records to an attacker" - data loss reported as a
+        # loss rather than as a leak. It matched no rule at all and was answered
+        # with "I do not have an approved knowledge document", with no ticket.
+        r"\b(?:lost|missing|gone)\b[\s\S]{0,30}?"
+        r"\b(?:customer\s+)?(?:data|records?|files?|documents?|database|customers?)\b"
+        r"[\s\S]{0,30}?\b(?:to|from)\b[\s\S]{0,15}?"
+        r"\b(?:an?\s+)?(?:attacker|hacker|thief|criminal|outsider|third[\s-]party)\b"
+        # The same event with the loss after the noun: "500 customer records are
+        # missing and we think an attacker took them."
+        r"|\b(?:customer\s+)?(?:data|records?|files?|documents?|database|customers?)\b"
+        r"[\s\S]{0,25}?\b(?:are|is|were|was|went)\s+(?:missing|lost|gone|stolen)\b"
+        r"[\s\S]{0,40}?\b(?:attacker|hacker|thief|criminal|outsider|third[\s-]party)\b",
+    ),
+    (
+        Intent.SECURITY_INCIDENT,
+        3.0,
         "privileged_account_at_risk",
         r"\b(?:admin|administrator|privileged|domain\s+admin|root|service)\s*"
         r"(?:account|credential|login)s?\b"
@@ -213,14 +286,6 @@ INTENT_RULES: tuple[tuple[Intent, float, str, str], ...] = (
         r"|\b(?:mfa|2fa|authenticator|login|sign[\s-]?in)\b[\s\S]{0,25}?"
         r"\b(?:prompt|request|notification|approval)\b[\s\S]{0,45}?"
         r"\b(?:approved|accepted|confirmed|tapped|said\s+yes)\b",
-    ),
-    (
-        Intent.SECURITY_INCIDENT,
-        3.0,
-        "privileged_account_at_risk",
-        r"\b(?:admin|administrator|privileged|domain\s+admin|root|service)\s*"
-        r"(?:account|credential|login)s?\b"
-        r"|\b(?:someone\s+else|somebody\s+else)\b[\s\S]{0,40}?\b(?:account|service\s+account)\b",
     ),
     # --- phishing ----------------------------------------------------------
     (Intent.PHISHING, 3.0, "phishing", r"\bphish"),
