@@ -7,6 +7,7 @@ must fail loudly, and no secret may ever leak through a public surface.
 from __future__ import annotations
 
 from pathlib import Path
+from typing import ClassVar
 
 import pytest
 from pydantic import ValidationError
@@ -186,6 +187,79 @@ class TestDotEnvLoading:
             key, _, value = stripped.partition("=")
             if key.strip() in {"LLM_API_KEY", "EMBEDDING_API_KEY"}:
                 assert value.strip() == "", f"{key} must ship empty in .env.example"
+
+
+class TestTheShippedDefaultsAreTheTestedDefaults:
+    """The drift that made every quality number describe a system nobody ran.
+
+    `RETRIEVAL_RELATIVE_FLOOR` was 0.5 in the tests and 0.7 in the shipped `.env`,
+    so expected-document recall measured 28/28 in the suite and 25/28 against the
+    running product - and the README reported the suite's number as the product's.
+    These assertions make the three places a default is written - the code, the
+    template a fresh clone copies, and the README a human reads - fail loudly when
+    they disagree. They are deliberately strict about *values*, because a default
+    is a claim about behaviour.
+    """
+
+    #: The retrieval and provider defaults the documentation publishes.
+    PUBLISHED: ClassVar[dict[str, str]] = {
+        "LLM_PROVIDER": "mock",
+        "EMBEDDING_PROVIDER": "tfidf",
+        "VECTOR_STORE": "faiss",
+        "RETRIEVAL_TOP_K": "6",
+        "RETRIEVAL_MIN_SCORE": "0.05",
+        "RETRIEVAL_RELATIVE_FLOOR": "0.5",
+    }
+
+    @staticmethod
+    def _env_example() -> dict[str, str]:
+        example = Path(__file__).resolve().parents[2] / ".env.example"
+        values: dict[str, str] = {}
+        for line in example.read_text(encoding="utf-8").splitlines():
+            stripped = line.strip()
+            if stripped.startswith("#") or "=" not in stripped:
+                continue
+            key, _, value = stripped.partition("=")
+            values[key.strip()] = value.strip()
+        return values
+
+    @staticmethod
+    def _readme_table() -> dict[str, str]:
+        readme = Path(__file__).resolve().parents[2] / "README.md"
+        documented: dict[str, str] = {}
+        for line in readme.read_text(encoding="utf-8").splitlines():
+            if not line.startswith("| `"):
+                continue
+            cells = [cell.strip().strip("`") for cell in line.strip("|").split("|")]
+            if len(cells) >= 2 and cells[0] in TestTheShippedDefaultsAreTheTestedDefaults.PUBLISHED:
+                documented[cells[0]] = cells[1]
+        return documented
+
+    def test_the_code_defaults_are_the_published_defaults(self) -> None:
+        fields = Settings.model_fields
+        for name, expected in self.PUBLISHED.items():
+            default = fields[name.lower()].default
+            assert str(default).lower() == expected.lower(), (
+                f"{name}: the code default is {default!r}, the documentation says {expected!r}"
+            )
+
+    def test_env_example_matches_the_code_defaults(self) -> None:
+        # A fresh clone copies this file, so a different value here is a different
+        # product from the one the test suite measures.
+        values = self._env_example()
+        for name, expected in self.PUBLISHED.items():
+            assert name in values, f"{name} is missing from .env.example"
+            assert values[name].lower() == expected.lower(), (
+                f"{name}: .env.example says {values[name]!r}, the code default is {expected!r}"
+            )
+
+    def test_the_readme_documents_the_same_defaults(self) -> None:
+        documented = self._readme_table()
+        for name, expected in self.PUBLISHED.items():
+            assert name in documented, f"{name} is not documented in the README settings table"
+            assert documented[name].lower() == expected.lower(), (
+                f"{name}: the README says {documented[name]!r}, the code default is {expected!r}"
+            )
 
 
 class TestSigningKey:

@@ -67,6 +67,32 @@ def docs() -> dict[str, str]:
     return texts
 
 
+class TestTheDefaultModeIsDisclosedUpFront:
+    """The one claim a reader must not have to hunt for.
+
+    The shipped provider is `mock` - a deterministic extractive generator, not a
+    language model - so the answer quality a reader sees is not representative of a
+    real model. The disclosure existed, three documents deep, while the README's
+    first paragraph read as though a model were answering. A claim that affects how
+    every other number should be read belongs in the opening.
+    """
+
+    def test_the_opening_states_the_offline_default(self, docs: dict[str, str]) -> None:
+        opening = "\n".join(docs["README.md"].splitlines()[:40])
+        lowered = opening.lower()
+        assert "llm_provider=mock" in lowered, "the README opening must name the default provider"
+        assert "offline" in lowered, "the README opening must say the default runs offline"
+        assert "extractive" in lowered, (
+            "the README opening must say the answers are extractive, not composed"
+        )
+
+    def test_the_opening_points_at_the_way_out(self, docs: dict[str, str]) -> None:
+        opening = "\n".join(docs["README.md"].splitlines()[:40])
+        assert "openai_compatible" in opening, (
+            "the opening must say how to switch to a real provider"
+        )
+
+
 def _referenced_paths(text: str) -> set[str]:
     """Backticked strings in the prose that name a file."""
     candidates: set[str] = set()

@@ -230,7 +230,7 @@ PRODUCT_SPEC.md §9. Each criterion with the evidence that it is met.
 | 1 | 用户能够登录 | `tests/test_auth.py`, `tests/test_auth_sessions.py` | Demo 0.3; the login screen |
 | 2 | 用户能够发送问题 | `tests/test_chat_api.py` | Scenarios A-D |
 | 3 | AI 能够识别 Intent | 40/40 on the evaluation set; `tests/test_classifiers.py` | The `INTENT` badge under every answer |
-| 4 | 系统能够检索知识库 | Expected document retrieved 29/29; `tests/test_rag_retrieval_quality.py` | The `SOURCES` section |
+| 4 | 系统能够检索知识库 | Expected document retrieved 28/28 graded questions; `tests/test_rag_retrieval_quality.py` | The `SOURCES` section |
 | 5 | 回答显示引用来源 | `payload.source_documents`; `frontend/src/components/SourceCitations.tsx` | Every grounded answer |
 | 6 | RBAC 生效 | `tests/test_authorization_matrix.py`; 0 restricted documents returned across 40 questions × 3 roles | Scenarios C.3, E, H |
 | 7 | 高风险事件能够识别 | 40/40 risk assessment; `tests/test_classifiers.py`, `tests/test_classification_pipeline.py` | The `RISK` badge; scenarios C, F.2 |
@@ -239,7 +239,7 @@ PRODUCT_SPEC.md §9. Each criterion with the evidence that it is met.
 | 10 | Docker Compose 可以启动整个系统 | `docker-compose.yml` + 83 static checks in `tests/test_deployment_assets.py` | [README § Deployment](../README.md#deployment) - **not executed here; no container runtime was available** |
 | 11 | 提供 README | [`README.md`](../README.md) | |
 | 12 | 提供至少 30 个测试问题 | **40** questions in `tests/data/evaluation_questions.json` | `pytest -m evaluation -q -s` |
-| 13 | 提供基本自动化测试 | 1415 backend tests (94% statement coverage) and 59 frontend tests | `scripts/check.ps1` |
+| 13 | 提供基本自动化测试 | 1444 backend tests (94% statement coverage) and 59 frontend tests | `scripts/check.ps1` |
 
 Additional security requirements from §7 are covered threat-by-threat in
 [ARCHITECTURE.md § Security model](ARCHITECTURE.md#7-security-model).

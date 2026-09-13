@@ -1,7 +1,6 @@
 # PROJECT STATUS — Enterprise Security AI Assistant
 
 **Current Phase:** Stabilization (defect repair, no new features)
-
 This file is the running state of the project. It is updated at the end of every work
 round, in the same commit as the change it describes. The requirements authority is
 `PRODUCT_SPEC.md`; the inherited engineering record is `PROJECT_HANDOFF.md`; the
@@ -32,7 +31,7 @@ independent defect register is `Reviewer Report.md`.
 
 ## Current
 
-**Round 1 — the silent-drop family — DONE (this commit)**
+**Round 1 — the silent-drop family — DONE**
 
 - [x] P0-01 (Reviewer P0-1) — guard refused legitimate policy questions: "Show me the password
       policy" (spec §2 scenario A) was blocked as `secret_extraction`. A credential noun followed
@@ -55,11 +54,29 @@ independent defect register is `Reviewer Report.md`.
 - [x] README + `docs/ARCHITECTURE.md` rule counts and guard section corrected to the measured
       reality.
 
+**Round 2 — the configuration the tests measure is the configuration that ships — DONE**
+
+- [x] P0-02 (Reviewer P0-2) — `OpenAICompatibleLLMClient.complete` was executed by nothing at all
+      (`app/ai/llm.py` 84%, whole method missed). 14 stub-transport tests now cover request
+      construction, the retry loop, the empty-response and non-JSON paths, and the error contract
+      that must not leak the provider's text. **`llm.py` is now 98% covered**, and every line of
+      `complete()` is exercised.
+- [x] P0-02 (documentation half) — the `mock`/offline default is now disclosed in the README's
+      opening section, with the way out (`LLM_PROVIDER=openai_compatible`), and a documentation
+      test fails if that disclosure is ever buried again.
+- [x] P1-02 (Reviewer P1-2) — test config ≠ shipped config. The local `.env` had drifted to
+      `RETRIEVAL_RELATIVE_FLOOR=0.7` / `RETRIEVAL_TOP_K=5` while every test and `.env.example`
+      used `0.5` / `6`, so expected-document recall was 25/28 on the running product and 28/28 in
+      the suite — and the README published the suite's number. `.env` realigned and the README
+      corrected to the measured figures.
+- [x] "29 / 29" corrected to **28 / 28** (the evaluation set has 28 graded questions, not 29) in
+      the README and `docs/DEMO.md`.
+- [x] A drift guard now asserts that the code default, `.env.example`, and the README settings
+      table agree for the six published defaults — it caught a second live drift
+      (`RETRIEVAL_TOP_K` documented as 5) on its first run.
+
 **Scheduled** (severity order; one round per commit):
 
-- [ ] P0-02 (Reviewer P0-2) — real LLM client untested + `mock` disclosure buried. Round 2
-- [ ] P1-02 (Reviewer P1-2) — test config ≠ shipped config; recall 25/28 vs the advertised 29/29.
-      Round 2
 - [ ] P1-03 (Reviewer P1-3) — anonymous `/api/v1/meta` discloses the AI stack. Round 3
 - [ ] P1-04 (Reviewer P1-4) — `/knowledge/search` embeds unthrottled. Round 3
 - [ ] P1-05 (Reviewer P1-5) — ticket `statistics` capped at 200 rows and not queue-scoped. Round 4
@@ -90,15 +107,16 @@ independent defect register is `Reviewer Report.md`.
 | Gate | Result |
 | --- | --- |
 | `scripts/check.ps1` (ruff, mypy, pytest, tsc, eslint, vitest, secret scan) | **exit 0** |
-| Backend `pytest -q` | **1444 passed, 1 skipped** (was 1415/1) |
-| Backend coverage `--cov=app` | 94% (4106 statements, 243 missed) — unchanged; re-measure after Round 5 |
+| Backend `pytest -q` | **1463 passed, 1 skipped** (started at 1415/1) |
+| Backend coverage `--cov=app` | **95%** (4128 statements, 214 missed); `app/ai/llm.py` **84% → 98%** |
 | Frontend `npm test` | **59 passed** (2 files) |
 | `security`-marked tests | 1067 → re-measured in Round 5 |
 | `backend/scripts/demo.py` | **67 / 67 checks passed** |
-| Evaluation set (40 questions, live API) | intent 40/40, risk 40/40, escalation 40/40, ticket 40/40, blocked 40/40; expected document 25/28 *(known config drift — Round 2)* |
+| Evaluation set (40 questions, live API) | intent 40/40, risk 40/40, escalation 40/40, ticket 40/40, blocked 40/40, **expected document 28/28** (was 25/28 before the config realignment) |
 | Escalation corpus | **52 / 52** S1/S2 phrasings escalate; 20 legitimate questions do not |
 | Injection corpus | **31 / 31** blocked; 12 document requests + 3 reported requests not blocked |
-| `scripts/check-no-secrets.ps1` | OK, 174 files, all required assets present |
+| Config drift guard | code default == `.env.example` == README settings table, for the six published defaults |
+| `scripts/check-no-secrets.ps1` | OK, 175 files, all required assets present |
 
 The single skip is `tests/test_deployment_assets.py:436` — the Docker CLI is absent on this
 machine, so acceptance criterion §9.10 (`docker compose up`) remains **unproven**, exactly as the
