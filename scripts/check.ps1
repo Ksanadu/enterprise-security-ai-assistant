@@ -12,6 +12,7 @@
 $ErrorActionPreference = 'Continue'
 $root = Split-Path -Parent $PSScriptRoot
 $failed = @()
+$ran = @()
 
 function Invoke-Step {
     param(
@@ -25,6 +26,7 @@ function Invoke-Step {
     Push-Location $WorkingDirectory
     try {
         Invoke-Expression $Command
+        $script:ran += $Name
         if ($LASTEXITCODE -ne 0) { $script:failed += $Name }
     }
     finally {
@@ -48,8 +50,22 @@ Invoke-Step 'frontend: vitest'   (Join-Path $root 'frontend') 'npm run test:cove
 Invoke-Step 'repo: secrets'      $root                        "& (Join-Path '$PSScriptRoot' 'check-no-secrets.ps1')"
 
 Write-Host ''
+foreach ($name in $ran) {
+    $mark = if ($failed -contains $name) { 'FAIL' } else { 'ok  ' }
+    Write-Host ("  {0} {1}" -f $mark, $name)
+}
+
 if ($failed.Count -gt 0) {
     Write-Host ('FAILED: ' + ($failed -join ', ')) -ForegroundColor Red
+    # In CI, name the failing gate as an annotation. Without this, a red run says
+    # only "Process completed with exit code 1", which is exactly as useful as no
+    # pipeline at all - the annotations are also readable from the commit page and
+    # from the Checks API without downloading a log.
+    if ($env:GITHUB_ACTIONS -eq 'true') {
+        foreach ($name in $failed) {
+            Write-Host "::error title=gate failed::$name failed; open the 'Run the gate' step for its output"
+        }
+    }
     exit 1
 }
 Write-Host 'All checks passed.' -ForegroundColor Green

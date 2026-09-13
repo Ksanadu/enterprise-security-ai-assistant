@@ -53,6 +53,16 @@ jobs:
         working-directory: frontend
         run: npm ci
 
+      # The documented first-time setup (README "First-time setup") ends with this
+      # copy, so the pipeline gets the same configuration a developer gets. It also
+      # matters for the deployment check: docker-compose.yml declares
+      # `env_file: - .env`, and Compose treats a missing env file as an error, so
+      # without this line the one environment that can validate the compose file is
+      # the one environment that has nothing to validate it with.
+      - name: Create .env from the template
+        shell: pwsh
+        run: Copy-Item .env.example .env
+
       - name: Run the gate
         shell: pwsh
         run: ./scripts/check.ps1

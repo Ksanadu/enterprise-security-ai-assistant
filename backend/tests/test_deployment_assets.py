@@ -431,20 +431,64 @@ class TestComposeSemantics:
     """Validate the file with the real tool when it is available."""
 
     def test_compose_config_is_valid_if_docker_is_installed(self) -> None:
+        """`docker compose config` on the real file, with the operator's `.env` supplied.
+
+        Two things this test learned the hard way, both of which made it fail on CI
+        while passing on the machine it was written on:
+
+        * **A `docker` binary is not a usable Compose plugin.** Hosted runners ship
+          the Docker CLI; `compose` is a plugin subcommand, and a plugin that is
+          missing, or a daemon that is not running, is an environment problem rather
+          than a defect in `docker-compose.yml`. Probing the subcommand first keeps
+          "cannot validate here" a skip and a genuinely malformed file a failure.
+        * **The compose file declares `env_file: - .env`, and `.env` is gitignored**,
+          so it does not exist in a fresh clone. Compose treats a missing `env_file`
+          as an error, which meant the one environment that *could* validate the file
+          - a runner with Docker - never had an `.env` to validate it against. The
+          template is the documented source of that file (`Copy-Item .env.example
+          .env`), so it is materialised for the duration of the check and removed
+          afterwards, and only when this test created it.
+        """
         docker = shutil.which("docker")
         if docker is None:
             pytest.skip(
                 "docker CLI is not installed in this environment; "
                 "docker-compose.yml is validated by static analysis instead"
             )
+
         # Fixed argv from a resolved path, no shell, no interpolated input.
-        completed = subprocess.run(  # noqa: S603
-            [docker, "compose", "-f", str(COMPOSE_FILE), "config", "--quiet"],
+        probe = subprocess.run(  # noqa: S603
+            [docker, "compose", "version"],
             capture_output=True,
             text=True,
             timeout=120,
             check=False,
         )
+        if probe.returncode != 0:
+            pytest.skip(
+                "the docker compose plugin is not usable here, so the file cannot be "
+                f"validated with it: {(probe.stderr or probe.stdout).strip()[:200]}"
+            )
+
+        env_file = PROJECT_ROOT / ".env"
+        created = False
+        if not env_file.exists():
+            # The template is committed and complete; the real file is the operator's.
+            shutil.copyfile(PROJECT_ROOT / ".env.example", env_file)
+            created = True
+
+        try:
+            completed = subprocess.run(  # noqa: S603
+                [docker, "compose", "-f", str(COMPOSE_FILE), "config", "--quiet"],
+                capture_output=True,
+                text=True,
+                timeout=120,
+                check=False,
+            )
+        finally:
+            if created:
+                env_file.unlink(missing_ok=True)
+
         assert completed.returncode == 0, completed.stderr
 
 
