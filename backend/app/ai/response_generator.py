@@ -26,7 +26,12 @@ from app.ai.llm import (
     split_sentences,
 )
 from app.ai.prompt_guard import GuardFinding, PromptGuard
-from app.ai.prompts import SYSTEM_PROMPT, build_no_context_answer, build_user_prompt
+from app.ai.prompts import (
+    SYSTEM_PROMPT,
+    build_no_context_answer,
+    build_unextractable_answer,
+    build_user_prompt,
+)
 from app.core.config import Settings, get_settings
 from app.core.enums import Role
 from app.rag.retriever import RetrievalResult
@@ -199,11 +204,21 @@ class ResponseGenerator:
         answer = completion.text.strip()
         if not answer:
             # A provider that returns nothing must not produce a silent empty
-            # answer; fall back to the deterministic no-context text.
+            # answer. Which fallback is honest depends on whether retrieval found
+            # anything: with no matches the assistant has nothing, but with matches
+            # it has documents it simply could not quote - and claiming "I do not
+            # have an approved knowledge document" while citing two of them
+            # contradicts the same response.
             logger.warning(
-                "llm_returned_empty provider=%s question_len=%d", completion.provider, len(question)
+                "llm_returned_empty provider=%s question_len=%d",
+                completion.provider,
+                len(question),
             )
-            answer = build_no_context_answer(role=role)
+            answer = (
+                build_unextractable_answer(role=role)
+                if retrieval.has_matches
+                else build_no_context_answer(role=role)
+            )
 
         actions = extract_actions(context)
 

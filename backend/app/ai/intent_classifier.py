@@ -146,6 +146,82 @@ INTENT_RULES: tuple[tuple[Intent, float, str, str], ...] = (
         "account_taken_over",
         r"\b(?:someone|somebody)\s+(?:has\s+|got\s+)?(?:access|logged\s+in)\b",
     ),
+    # The events in KB-009's severity table, described by their *effect* rather
+    # than by name. Without these the turn falls through to `out_of_scope`, which
+    # skips retrieval entirely - so a ransomware report was answered with "I do
+    # not have an approved knowledge document for this question" while a ticket
+    # was raised behind it.
+    #
+    # Weights sit deliberately at 1.8: above the generic fallback (which is what
+    # made them out of scope) but *below* the phishing rules at 2.0, because
+    # "I entered my password on that page before I realised it was fake" is a
+    # phishing report, and a broader incident label must not outrank the specific
+    # one. An earlier 3.0 took over that sentence and broke the demo walkthrough.
+    (
+        Intent.SECURITY_INCIDENT,
+        1.8,
+        "ransomware_effect",
+        r"\b(?:files?|documents?|folders?|everything)\b[\s\S]{0,40}?"
+        r"\b(?:locked|encrypted|will\s+not\s+open|cannot\s+be\s+opened)\b"
+        r"|\b(?:note|message|demand)\b[\s\S]{0,40}?"
+        r"\b(?:demanding\s+(?:payment|money)|wants?\s+(?:money|payment))\b",
+    ),
+    (
+        Intent.SECURITY_INCIDENT,
+        1.8,
+        "data_left_the_building",
+        r"\b(?:data|customer\s+data|records?|files?|database)\b[\s\S]{0,40}?"
+        r"\b(?:copied|uploaded|sent|transferred|shared)\b[\s\S]{0,40}?"
+        r"\b(?:external|outside|personal|unapproved|unauthori[sz]ed|third[\s-]party|cloud)\b",
+    ),
+    (
+        Intent.SECURITY_INCIDENT,
+        1.8,
+        "malware_ran",
+        r"\b(?:something|it|program|macro|script|installer|attachment)\b[\s\S]{0,30}?"
+        r"\b(?:installed\s+itself|started\s+itself|began\s+running|ran|executed|launched)\b"
+        r"|\b(?:ran|executed|double[\s-]?clicked|opened)\b[\s\S]{0,30}?"
+        r"\b(?:attachment|invoice|macro|installer|file|\.exe)\b",
+    ),
+    (
+        Intent.SECURITY_INCIDENT,
+        1.8,
+        "privileged_account_at_risk",
+        r"\b(?:admin|administrator|privileged|domain\s+admin|root|service)\s*"
+        r"(?:account|credential|login)s?\b"
+        r"|\b(?:someone\s+else|somebody\s+else)\b[\s\S]{0,40}?\b(?:account|service\s+account)\b",
+    ),
+    # Credentials handed over, and MFA prompts approved. Both are incidents by
+    # KB-009's table and both were landing in `out_of_scope`, so the user was told
+    # the assistant had no document for a credential compromise.
+    (
+        Intent.SECURITY_INCIDENT,
+        1.8,
+        "credentials_handed_over",
+        r"\b(?:put|gave|give|handed\s+over|filled\s+in|entered|typed|submitted)\b[\s\S]{0,40}?"
+        r"\b(?:username\s+and\s+password|login\s+details|credentials?|password|login\s+form|"
+        r"company\s+account|work\s+account)\b"
+        r"|\b(?:signed|logged)\s+in\b[\s\S]{0,35}?"
+        r"\b(?:link|e-?mail|message|fake|phishing|that\s+page|the\s+page)\b",
+    ),
+    (
+        Intent.SECURITY_INCIDENT,
+        1.8,
+        "mfa_approved",
+        r"\b(?:approved|accepted|confirmed|tapped\s+yes|said\s+yes\s+to)\b[\s\S]{0,40}?"
+        r"\b(?:mfa|2fa|push|authenticator|login|sign[\s-]?in|verification)\b"
+        r"|\b(?:mfa|2fa|authenticator|login|sign[\s-]?in)\b[\s\S]{0,25}?"
+        r"\b(?:prompt|request|notification|approval)\b[\s\S]{0,45}?"
+        r"\b(?:approved|accepted|confirmed|tapped|said\s+yes)\b",
+    ),
+    (
+        Intent.SECURITY_INCIDENT,
+        3.0,
+        "privileged_account_at_risk",
+        r"\b(?:admin|administrator|privileged|domain\s+admin|root|service)\s*"
+        r"(?:account|credential|login)s?\b"
+        r"|\b(?:someone\s+else|somebody\s+else)\b[\s\S]{0,40}?\b(?:account|service\s+account)\b",
+    ),
     # --- phishing ----------------------------------------------------------
     (Intent.PHISHING, 3.0, "phishing", r"\bphish"),
     (

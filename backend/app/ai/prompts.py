@@ -94,3 +94,37 @@ def build_no_context_answer(*, role: Role) -> str:
         "confidently. Consider recording the question as a knowledge gap so the "
         "documentation can be extended."
     )
+
+
+def build_unextractable_answer(*, role: Role) -> str:
+    """Fallback for when documents *were* retrieved but nothing could be quoted.
+
+    This is a different situation from :func:`build_no_context_answer` and needs
+    different words. The offline extractive provider declines to quote a sentence
+    that does not actually answer the question, which is the right behaviour - but
+    the answer then has to agree with the payload it sits beside. Saying "I do not
+    have an approved knowledge document" while the same response cites two of them
+    contradicts itself, and it did so for a ransomware report: the user was told
+    nothing existed about their incident and handed two citations and a ticket.
+
+    Unlike the no-context text this one *may* point at the sources, because they
+    are the caller's own authorised documents and are already listed underneath.
+    """
+    if role is Role.EMPLOYEE:
+        return (
+            "I found related material in the knowledge base but could not extract a "
+            "direct answer from it. The documents listed below are the closest "
+            "matches and are worth reading in full. If this is a security incident, "
+            "contact the security team now — see the Security Contact Guide (KB-011)."
+        )
+    if role is Role.IT:
+        return (
+            "Related documents were found but none of them directly answers this. "
+            "The sources below are the closest matches. Escalate to the security "
+            "team if the issue involves a possible incident."
+        )
+    return (
+        "Related documents were found but none of them directly answers this. The "
+        "sources below are the closest matches. Consider recording the question as "
+        "a knowledge gap so the documentation can be extended."
+    )

@@ -145,6 +145,35 @@ document's identifier, title or path.
   mandatory escalation. It offers no control that could change the assessment.
 * 666 backend tests + 32 frontend tests; `ruff`, `mypy`, `tsc` and `eslint` clean.
 
+**Escalation coverage: measured, and it was bad.** `PRODUCT_SPEC.md`'s whole point is routing an
+incident to a person, so a *missed* escalation is the failure that matters. A QA pass built a corpus
+of realistic phrasings for every S1/S2 row in the severity table the knowledge base publishes
+(KB-009 section 2) and measured it:
+
+| | Before | After |
+| --- | --- | --- |
+| S1/S2 events that reach a human | **14 / 32 (44%)** | **32 / 32 (100%)** |
+| Events filed as "I do not cover that" | 13 of the 18 misses | 0 |
+
+The root cause was vocabulary: the rules matched the policy's own words - "ransomware", "data
+exfiltrated" - while people describe the *effect*. "My files have been locked and they want money"
+and "Customer data has been copied out to an external site" matched nothing, fell through to
+`out_of_scope`, and were answered with *"I do not have an approved knowledge document that answers
+this question."* Nothing was escalated and no ticket was raised. Because `out_of_scope` also skips
+retrieval, there were no citations either.
+
+The rules now match the events rather than the labels, and the corpus is asserted in both
+directions - a rule set that escalated everything would score 100% on coverage alone and be
+useless, so 21 legitimate questions are asserted not to escalate. Three further defects surfaced
+while widening them:
+
+| Found | Fix |
+| ----- | --- |
+| `\bcompromis\b` can never match "compromised" - a word boundary cannot fall between two word characters. The privileged-account rule had therefore **never fired**. | Stems carry `\w*`; the case is asserted directly |
+| A rule matched the bare noun "malware", so *"What is the malware response procedure?"* escalated - and the knowledge base **ships** a Malware Incident Response SOP | Matching a detection ("malware alerts", "detected", "quarantined"), not a mention |
+| A lost device escalated even when the report said it was encrypted and remotely wiped - which KB-009 rates **S4** | Mitigating evidence now reduces the level, as the policy requires |
+| The extractive provider declines to quote a sentence that does not answer the question, and the resulting empty answer was replaced with the *no-context* text - so a ransomware report was told no document existed **while the same response cited two and raised a ticket** | A separate fallback for "found documents, could not quote them", asserted as an invariant |
+
 **Structured output stability.** `tests/test_structured_output_stability.py` treats "stable" as
 four separate properties, because each fails differently: the payload is **deterministic** between
 identical requests, has the **same field set on every code path** (normal, blocked, ungrounded),
@@ -255,9 +284,9 @@ field nobody reads is not an answer.
   dashboard, triage it, and check the audit trail - all through HTTP.
 * **Cross-role consistency**: the same question asked by all three roles must produce an
   identical classification and identical escalation, while retrieval differs and stays in scope.
-* **961 security-marked tests** covering RBAC, injection, leakage, session handling, ticket
+* **998 security-marked tests** covering RBAC, injection, leakage, session handling, ticket
   scoping, redaction and the deployment assets, runnable as one suite with `pytest -m security`.
-* 1331 backend tests, **94% statement coverage**; `ruff`, `mypy`, `tsc` and `eslint` clean.
+* 1368 backend tests, **94% statement coverage**; `ruff`, `mypy`, `tsc` and `eslint` clean.
 
 The set immediately earned its keep. Writing it exposed a set of real defects:
 
@@ -416,7 +445,7 @@ stale cached index). A mismatch is logged as a security event and the chunk is d
 │   ├── scripts/
 │   │   ├── demo.py               # the executable demonstration (67 checks)
 │   │   └── update_evaluation_expectations.py
-│   ├── tests/                    # 1331 tests
+│   ├── tests/                    # 1368 tests
 │   └── requirements*.txt
 ├── frontend/
 │   ├── Dockerfile                # Vite build stage → nginx runtime stage
@@ -721,12 +750,12 @@ The suite has three layers:
 
 | Layer | What it covers | How to run |
 | ----- | -------------- | ---------- |
-| Unit and integration (1331 tests) | Every module: config guards, ORM, RAG, classifiers, services, API, deployment assets | `pytest -q` |
-| Security (961 tests) | RBAC, injection, leakage, sessions, ticket scoping, redaction, deployment hardening | `pytest -m security` |
+| Unit and integration (1368 tests) | Every module: config guards, ORM, RAG, classifiers, services, API, deployment assets | `pytest -q` |
+| Security (998 tests) | RBAC, injection, leakage, sessions, ticket scoping, redaction, deployment hardening | `pytest -m security` |
 | Evaluation (61 tests) | The 40-question set and the end-to-end demo walkthrough | `pytest -m evaluation` |
 
 ```powershell
-# backend: 1331 tests, 94% statement coverage
+# backend: 1368 tests, 94% statement coverage
 cd backend
 .\.venv\Scripts\python.exe -m pytest -q
 .\.venv\Scripts\python.exe -m pytest -m security -q          # security subset

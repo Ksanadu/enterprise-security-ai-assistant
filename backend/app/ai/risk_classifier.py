@@ -125,10 +125,32 @@ RISK_RULES: tuple[tuple[RiskLevel, str, str], ...] = (
         "ransomware",
         r"\b(?:ransomware|ransom\s+note|paid\s+the\s+ransom|files?\s+(?:are\s+|were\s+)?encrypt)",
     ),
+    # KB-009 says "ransomware or confirmed data exfiltration" is S1. Users do not
+    # say "ransomware"; they say their files will not open and someone wants money.
+    # A rule that only matches the policy's own vocabulary fails the person who
+    # needs it, so the effect is matched as well as the word.
+    (
+        RiskLevel.CRITICAL,
+        "ransomware",
+        r"\b(?:files?|documents?|folders?|data|everything)\b[\s\S]{0,40}?"
+        r"\b(?:locked|encrypted|held\s+to\s+ransom|inaccess|will\s+not\s+open|cannot\s+be\s+opened)\b"
+        r"|"
+        r"\b(?:note|message|demand|email)\b[\s\S]{0,40}?"
+        r"\b(?:demanding\s+(?:payment|money|bitcoin)|wants?\s+(?:money|payment|bitcoin)|ransom)\b",
+    ),
     (
         RiskLevel.CRITICAL,
         "data_exfiltration",
         r"\b(?:data\s+(?:has\s+been\s+)?(?:leaked|exfiltrated|stolen|left\s+the\s+company)|exfiltrat)",
+    ),
+    # "copied out to an external site", "uploaded to a personal cloud drive".
+    (
+        RiskLevel.CRITICAL,
+        "data_exfiltration",
+        r"\b(?:data|customer\s+data|records?|files?|documents?|database)\b[\s\S]{0,40}?"
+        r"\b(?:copied|uploaded|sent|transferred|moved|shared)\b[\s\S]{0,40}?"
+        r"\b(?:external|outside|personal|private|unapproved|unauthori[sz]ed|third[\s-]party|"
+        r"cloud\s+drive|dropbox|usb|removable)",
     ),
     (
         RiskLevel.CRITICAL,
@@ -140,10 +162,54 @@ RISK_RULES: tuple[tuple[RiskLevel, str, str], ...] = (
         "privileged_compromise",
         r"\b(?:admin|administrator|privileged|domain\s+admin|root)\s+(?:account|credential)s?\s*(?:was\s+|were\s+|is\s+|has\s+been\s+)?(?:compromised|breached|stolen|taken)",
     ),
+    # A privileged account "used by someone else", "used from an unknown
+    # location", or credentials that "may have leaked" are all S1 suspicions.
+    #
+    # The stems carry a trailing `\w*` rather than a `\b`: "compromis" followed by
+    # a word boundary can never match "compromised", because the boundary would
+    # have to fall between two word characters. That single character is why this
+    # rule silently never fired for "the domain administrator account may be
+    # compromised".
+    (
+        RiskLevel.CRITICAL,
+        "privileged_compromise",
+        r"\b(?:admin|administrator|privileged|domain\s+admin|root|service)\s*"
+        r"(?:account|credential|login)s?\b[\s\S]{0,60}?"
+        r"\b(?:compromis\w*|hijack\w*|using|used|accessed|leaked|someone\s+else|"
+        r"unknown\s+location|impossible\s+travel|not\s+(?:me|us|ours))\b",
+    ),
+    # The same suspicion stated the other way round: the "someone else" comes
+    # first, as in "Someone else appears to be using the service account."
+    (
+        RiskLevel.CRITICAL,
+        "privileged_compromise",
+        r"\b(?:someone\s+else|somebody\s+else|another\s+person|not\s+(?:me|us|ours))\b"
+        r"[\s\S]{0,50}?"
+        r"\b(?:service\s+account|admin(?:istrator)?\s+account|privileged|domain\s+admin|"
+        r"root\s+account|system\s+account)\b",
+    ),
     (
         RiskLevel.CRITICAL,
         "server_compromise",
         r"\bserver\s+(?:is\s+|was\s+|has\s+been\s+)?(?:compromised|infected|breached)",
+    ),
+    # A lost device is S4 only when it was encrypted *and* a remote wipe
+    # succeeded; otherwise KB-009 rates it S1. Assume the worse case when the
+    # report does not say, because "probably fine" is explicitly not a reason to
+    # reduce severity.
+    (
+        RiskLevel.CRITICAL,
+        "lost_device_at_risk",
+        r"\b(?:laptop|phone|device|tablet|usb|drive|hard\s+disk)\b[\s\S]{0,50}?"
+        r"\b(?:lost|stolen|missing|taken|left\s+(?:it\s+)?(?:on|in))\b[\s\S]{0,60}?"
+        r"\b(?:unencrypted|not\s+encrypted|no\s+encryption|wipe\s+(?:did\s+not|has\s+not|failed|unconfirmed)|"
+        r"company\s+data|confidential|restricted)\b"
+        # ...and the order people actually use: "I lost my unencrypted laptop
+        # with company data on it." The device noun comes after the verb.
+        r"|"
+        r"\b(?:lost|stolen|misplaced|taken)\b[\s\S]{0,40}?"
+        r"\b(?:unencrypted|not\s+encrypted|no\s+encryption)\b[\s\S]{0,60}?"
+        r"\b(?:laptop|phone|device|tablet|usb|drive|company\s+data|confidential|restricted)\b",
     ),
     (
         RiskLevel.CRITICAL,
@@ -197,22 +263,47 @@ RISK_RULES: tuple[tuple[RiskLevel, str, str], ...] = (
     ),
     (
         RiskLevel.HIGH,
-        "malware_symptoms",
-        r"\b(?:malware|trojan|keylogger|rootkit|spyware|virus\s+detected)\b",
+        "malware_detected",
+        # A detection, not a mention. The bare word "malware" is how someone asks
+        # *about* it ("What is the malware response procedure?") and the knowledge
+        # base ships a Malware Incident Response SOP, so matching the noun alone
+        # escalated every question that named it. What makes it a report is a
+        # detection word next to it - in any form, since "malware alerts" is as
+        # much a report as "malware was detected".
+        r"\b(?:malware|trojan|keylogger|rootkit|spyware|virus)\b[\s\S]{0,40}?"
+        r"\b(?:detect\w*|found|removed|quarantin\w*|blocked|alert\w*|report\w*|warning|"
+        r"infect\w*|scan\w*)\b"
+        r"|"
+        r"\b(?:antivirus|defender|edr|scanner)\b[\s\S]{0,40}?"
+        r"\b(?:detect\w*|flagged|quarantin\w*|alert\w*|found)\b",
     ),
     (
         RiskLevel.HIGH,
         "malware_symptoms",
         r"\b(?:strange|odd|unusual|weird|unexpected)\s+(?:pop[\s-]?ups?|windows?|behaviou?r|activity|files?)\b",
     ),
-    (RiskLevel.HIGH, "infected_device", r"\b(?:infected|hacked|compromised|breached)\b"),
+    (
+        RiskLevel.HIGH,
+        "infected_device",
+        # "compromised" alone is ambiguous; paired with a device or account it is a
+        # report. The privileged-account case is critical and matched above.
+        r"\b(?:infected|hacked|compromised|breached)\b",
+    ),
     (
         RiskLevel.HIGH,
         "lost_device",
         # Active voice ("I lost my laptop") and passive voice ("my laptop was
         # stolen"). The passive form is how people actually report a theft.
-        r"\b(?:lost|stolen|misplaced)\s+(?:my\s+|the\s+)?(?:laptop|device|phone|usb|drive|memory\s+stick)\b"
-        r"|\b(?:laptop|device|phone|usb|drive|memory\s+stick|bag|backpack)\b[^.]{0,30}?\b(?:was|were|got|has\s+been|have\s+been)\s+(?:lost|stolen|misplaced|taken)\b",
+        #
+        # KB-009 reduces a lost device to S4 when it was encrypted *and* the remote
+        # wipe succeeded, and says severity may be reduced "only with evidence".
+        # "encrypted and I wiped it" is that evidence, so the rule declines when
+        # the report supplies it; without that, every well-handled theft would page
+        # the security team.
+        r"(?![\s\S]*\b(?:encrypted|bitlocker|filevault)\b[\s\S]{0,60}?\b(?:wiped|wipe\s+succeeded|erased|remote\s+wipe)\b)"
+        r"(?![\s\S]*\b(?:wiped|wipe\s+succeeded|erased)\b[\s\S]{0,60}?\b(?:encrypted|bitlocker|filevault)\b)"
+        r"(?:\b(?:lost|stolen|misplaced)\s+(?:my\s+|the\s+)?(?:laptop|device|phone|usb|drive|memory\s+stick)\b"
+        r"|\b(?:laptop|device|phone|usb|drive|memory\s+stick|bag|backpack)\b[^.]{0,30}?\b(?:was|were|got|has\s+been|have\s+been)\s+(?:lost|stolen|misplaced|taken)\b)",
     ),
     (
         RiskLevel.HIGH,
@@ -222,6 +313,56 @@ RISK_RULES: tuple[tuple[RiskLevel, str, str], ...] = (
         r"(?:my\s+|your\s+|their\s+|his\s+|her\s+|our\s+|the\s+|a\s+user'?s?\s+)?(?:account|mailbox|e-?mail|inbox)\b",
     ),
     (RiskLevel.HIGH, "unauthorised_access", r"\bunauthoris?zed\s+(?:access|login|sign[\s-]?in)\b"),
+    # KB-009 "malicious attachment executed on one endpoint" is S2. People
+    # describe the effect - something ran, installed, or a macro fired - not the
+    # classification, so the execution is matched as well as the label.
+    (
+        RiskLevel.HIGH,
+        "malware_executed",
+        r"\b(?:ran|run|executed|opened|launched|double[\s-]?clicked|clicked)\b[\s\S]{0,40}?"
+        r"\b(?:attachment|file|document|invoice|macro|installer|\.exe|zip|spreadsheet)\b"
+        r"|"
+        r"\b(?:macro|script|installer|program|something|it)\b[\s\S]{0,30}?"
+        r"\b(?:ran|executed|installed\s+itself|started\s+itself|began\s+running|launched\s+itself)\b",
+    ),
+    # KB-009: "user approved an unexpected MFA prompt" is S2.
+    (
+        RiskLevel.HIGH,
+        "mfa_approved",
+        r"\b(?:approved|accepted|confirmed|allowed|tapped\s+yes|said\s+yes\s+to|authorised|authorized)\b"
+        r"[\s\S]{0,40}?"
+        r"\b(?:mfa|2fa|push|authenticator|login\s+(?:prompt|request|approval|notification)|"
+        r"sign[\s-]?in\s+(?:prompt|request|approval|notification)|verification\s+(?:prompt|request))\b"
+        r"|"
+        # The other order, which is how a phone notification is usually described:
+        # "My phone showed a login approval and I tapped yes."
+        r"\b(?:mfa|2fa|authenticator|login|sign[\s-]?in|verification)\b[\s\S]{0,25}?"
+        r"\b(?:prompt|request|notification|approval|push)\b[\s\S]{0,45}?"
+        r"\b(?:i\s+)?(?:approved|accepted|confirmed|tapped(?:\s+yes)?|said\s+yes|allowed)\b",
+    ),
+    # The verb a person uses is "put", "gave", "filled in", "signed in" - none of
+    # which the past-tense rule above matches.
+    (
+        RiskLevel.HIGH,
+        "credentials_submitted",
+        r"\b(?:put|gave|give|handed\s+over|filled\s+in|fill\s+in|typed|entered|used|signed\s+in|"
+        r"logged\s+in|signed\s+up)\b[\s\S]{0,40}?"
+        r"\b(?:my\s+|the\s+|their\s+|your\s+)?(?:username\s+and\s+password|login\s+details|"
+        r"credentials?|password|company\s+account|work\s+account)\b",
+    ),
+    # "I filled in the login form" / "I signed in using the link in the email".
+    # Both need a first-person subject immediately before the verb: without it the
+    # sentence is somebody *describing* a phishing email ("the email asked me to
+    # fill in the login form"), where nothing has been entered.
+    (
+        RiskLevel.HIGH,
+        "credentials_submitted",
+        r"\bi\s+(?:filled\s+in|fill\s+in|entered|typed|put|gave|submitted)\b[\s\S]{0,30}?"
+        r"\blogin\s+(?:form|page|screen|details)\b"
+        r"|"
+        r"\b(?:signed|logged)\s+in\b[\s\S]{0,35}?"
+        r"\b(?:link|e-?mail|message|that\s+page|the\s+page|fake|phishing|attachment)\b",
+    ),
     # --- medium -----------------------------------------------------------
     # An interaction without a confirmed compromise. Note the past tense: being
     # *asked* to click a link is a report, not an interaction.

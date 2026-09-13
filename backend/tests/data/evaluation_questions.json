@@ -268,7 +268,7 @@
       "question": "My laptop was stolen from my car and the disk was not encrypted.",
       "expected": {
         "intent": "security_incident",
-        "risk_level": "high",
+        "risk_level": "critical",
         "escalation": true,
         "ticket": true,
         "blocked": false,
@@ -277,7 +277,8 @@
           "KB-006",
           "KB-011"
         ]
-      }
+      },
+      "notes": "KB-009 rates 'lost device, unencrypted, or wipe unconfirmed' as S1 - Critical, with a 15-minute response target and mandatory immediate escalation. This entry previously expected 'high' (S2), which contradicted the published policy in the dangerous direction: treating an S1 event as S2 would breach the documented SLA. Corrected when the risk rules were extended to cover realistic phrasings of the S1/S2 events in KB-009's table."
     },
     {
       "id": "incident-005",
