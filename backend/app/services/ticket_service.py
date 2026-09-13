@@ -166,6 +166,28 @@ class TicketService:
         return ticket
 
     # -- reads ------------------------------------------------------------
+    def _visible_scope(self, *, user: User) -> list[Any]:
+        """The predicates describing what this principal may read.
+
+        One definition, used by the list *and* by the counts, so the numbers on the
+        page can never disagree with the rows beneath them.
+        """
+        criteria = visible_ticket_filter(user.role, user.id)
+
+        created_by = criteria.get("created_by_user_id")
+        owner_roles = criteria.get("owner_roles")
+        if created_by is not None and owner_roles:
+            # IT: their own tickets plus everything their team is responsible for.
+            return [
+                or_(
+                    Ticket.created_by_user_id == created_by,
+                    Ticket.owner_role.in_(owner_roles),
+                )
+            ]
+        if created_by is not None:
+            return [Ticket.created_by_user_id == created_by]
+        return []
+
     def list_visible(
         self,
         session: Session,
@@ -182,21 +204,7 @@ class TicketService:
         The scope comes from the shared policy, so the database does the
         filtering rather than a post-filter in Python.
         """
-        criteria = visible_ticket_filter(user.role, user.id)
-        statement = select(Ticket)
-
-        created_by = criteria.get("created_by_user_id")
-        owner_roles = criteria.get("owner_roles")
-        if created_by is not None and owner_roles:
-            # IT: their own tickets plus everything their team is responsible for.
-            statement = statement.where(
-                or_(
-                    Ticket.created_by_user_id == created_by,
-                    Ticket.owner_role.in_(owner_roles),
-                )
-            )
-        elif created_by is not None:
-            statement = statement.where(Ticket.created_by_user_id == created_by)
+        statement = select(Ticket).where(*self._visible_scope(user=user))
 
         if status is not None:
             statement = statement.where(Ticket.status == status)
@@ -213,7 +221,18 @@ class TicketService:
         return list(session.scalars(statement).all())
 
     def count_visible(self, session: Session, *, user: User) -> int:
-        return len(self.list_visible(session, user=user, limit=MAX_PAGE_SIZE))
+        """How many tickets this user can see, counted in SQL.
+
+        It used to fetch up to `MAX_PAGE_SIZE` rows and take their length, which is
+        a silent wrong answer past 200 tickets: the oldest rows simply stopped
+        existing for the counter.
+        """
+        return int(
+            session.scalar(
+                select(func.count()).select_from(Ticket).where(*self._visible_scope(user=user))
+            )
+            or 0
+        )
 
     def get_visible(self, session: Session, *, user: User, reference: str) -> Ticket:
         """Fetch a ticket by reference, or report it missing.
@@ -467,18 +486,36 @@ class TicketService:
         return "\n".join(lines)[:2000]
 
     def statistics(self, session: Session, *, user: User) -> dict[str, Any]:
-        """Counts for the tickets this user can see. No ticket content."""
-        tickets = self.list_visible(session, user=user, limit=MAX_PAGE_SIZE)
-        by_status: dict[str, int] = {status.value: 0 for status in TicketStatus}
-        by_severity: dict[str, int] = {severity.value: 0 for severity in Severity}
-        for ticket in tickets:
-            by_status[ticket.status.value] += 1
-            by_severity[ticket.severity.value] += 1
+        """Counts for the tickets this user can see. No ticket content.
+
+        Every number is a SQL aggregate over the caller's own visibility scope
+        (`_visible_scope`), not a tally of a fetched page. The page-capped version
+        was wrong in two ways: past 200 tickets every figure was silently truncated
+        (the *oldest* rows vanished first, because the page is ordered newest-first),
+        and it did the counting in Python after moving rows over the wire.
+        """
+        scope = self._visible_scope(user=user)
+
+        def count(*extra: Any) -> int:
+            statement = select(func.count()).select_from(Ticket).where(*scope, *extra)
+            return int(session.scalar(statement) or 0)
+
+        def group(column: Any) -> dict[str, int]:
+            rows = session.execute(
+                select(column, func.count()).select_from(Ticket).where(*scope).group_by(column)
+            ).all()
+            return {str(key.value if hasattr(key, "value") else key): int(value) for key, value in rows}
+
+        by_status = {status.value: 0 for status in TicketStatus}
+        by_status.update(group(Ticket.status))
+        by_severity = {severity.value: 0 for severity in Severity}
+        by_severity.update(group(Ticket.severity))
+
         return {
-            "total": len(tickets),
-            "open": sum(1 for ticket in tickets if ticket.is_open),
+            "total": count(),
+            "open": count(Ticket.status.in_([s for s in TicketStatus if not s.is_terminal])),
             "escalated": by_status[TicketStatus.ESCALATED.value],
-            "requiring_human": sum(1 for ticket in tickets if ticket.escalation_required),
+            "requiring_human": count(Ticket.escalation_required.is_(True)),
             "by_status": by_status,
             "by_severity": by_severity,
         }

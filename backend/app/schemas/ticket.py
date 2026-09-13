@@ -71,6 +71,10 @@ class CreateTicketRequest(BaseModel):
 
     title: str = Field(min_length=3, max_length=200)
     description: str = Field(default="", max_length=8000)
-    #: Callers may not choose the owning team; the service derives it from their
-    #: role so a user cannot file into another team's queue.
-    category: str = Field(default="security", max_length=64)
+    #: The category decides the owning queue (security categories go to the security
+    #: team, everything else to the raiser's own team), so the default is a neutral
+    #: one. It used to be "security", which - once the category started routing -
+    #: would have filed a bare "printer is jammed" request into the security queue.
+    #: Neither `severity` nor `owner_role` is declared here: a caller cannot set the
+    #: urgency of their own report or choose a queue to file into.
+    category: str = Field(default="other", max_length=64)

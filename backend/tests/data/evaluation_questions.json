@@ -136,13 +136,13 @@
         "intent": "phishing",
         "risk_level": "medium",
         "escalation": false,
-        "ticket": false,
+        "ticket": true,
         "blocked": false,
         "documents_any_of": [
           "KB-002"
         ]
       },
-      "notes": "The negation matters: a click alone is medium, not high. Medium is the tier that ASKS before filing - the missing fact (were credentials entered?) is what decides the severity, so nothing is raised yet. Covered by test_medium_phishing_report_asks_before_filing in tests/test_ticket_workflow.py."
+      "notes": "The negation matters: a click alone is medium, not high. Medium is the tier that ASKS the decisive question (were credentials entered?) - and it now also TRACKS the report while asking, because a report whose question was never answered used to be filed nowhere at all. The tracking ticket is medium and not escalated. Covered by test_medium_phishing_report_asks_and_tracks in tests/test_ticket_workflow.py."
     },
     {
       "id": "phish-004",

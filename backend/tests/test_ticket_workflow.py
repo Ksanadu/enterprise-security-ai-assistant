@@ -70,14 +70,17 @@ class TestTicketCreationFromChat:
         assert created.owner_role is Role.SECURITY
         assert created.escalation_required is True
 
-    def test_medium_phishing_report_asks_before_filing(
+    def test_medium_phishing_report_asks_and_tracks(
         self, client: TestClient, employee_headers
     ) -> None:
-        """A clicked link with nothing entered is S3: ask, do not file yet.
+        """A clicked link with nothing entered is S3: ask the question *and* track it.
 
         The medium tier exists because the fact that decides the severity is
-        missing. Filing here would put a click that turns out to be harmless into
-        the security queue; asking is what a duty analyst does first.
+        missing, so the assistant asks. What it must not do is wait for the answer
+        before recording anything: a report whose question was never answered - the
+        user asked something else instead - used to be tracked nowhere at all, which
+        is a data-loss bug in a compliance trail. The ticket filed here is medium and
+        not escalated, so the queue does not fill with unconfirmed incidents.
         """
         before = len(all_tickets())
         conversation_id = new_conversation(client, employee_headers)
@@ -89,15 +92,21 @@ class TestTicketCreationFromChat:
         )
         assert payload["risk_level"] == "medium"
         assert payload["workflow_action"] == "clarify"
-        assert payload["ticket_reference"] is None
         assert payload["human_escalation"] is False
+        assert payload["ticket_reference"], "the report is tracked from the moment it is made"
 
         # It asks about the missing decisive fact, not something generic.
         question = payload["clarifying_question"]
         assert question, "a clarifying turn must actually ask something"
         assert "password" in question.lower() or "code" in question.lower()
 
-        assert len(all_tickets()) == before, "nothing should be filed yet"
+        assert len(all_tickets()) == before + 1, "exactly one tracking ticket"
+        ticket = client.get(
+            f"/api/v1/tickets/{payload['ticket_reference']}", headers=employee_headers
+        ).json()
+        assert ticket["severity"] == "medium"
+        assert ticket["status"] == "open"
+        assert ticket["escalation_required"] is False
 
     def test_the_clarifying_question_reaches_the_user(
         self, client: TestClient, employee_headers
@@ -121,7 +130,11 @@ class TestTicketCreationFromChat:
     def test_answering_the_question_moves_the_turn_to_the_right_tier(
         self, client: TestClient, employee_headers
     ) -> None:
-        """The follow-up decides: credentials entered means a real incident."""
+        """The follow-up decides: credentials entered means a real incident.
+
+        And it escalates the ticket that is already tracking the report, rather than
+        opening a second one - one incident, one ticket.
+        """
         conversation_id = new_conversation(client, employee_headers)
         first = ask(
             client,
@@ -130,7 +143,8 @@ class TestTicketCreationFromChat:
             "I clicked the link in that email but did not enter anything.",
         )
         assert first["workflow_action"] == "clarify"
-        assert first["ticket_reference"] is None
+        assert first["ticket_reference"], "tracked from the start"
+        tracking_reference = first["ticket_reference"]
 
         second = ask(
             client,
@@ -140,7 +154,9 @@ class TestTicketCreationFromChat:
         )
         assert second["risk_level"] == "high"
         assert second["human_escalation"] is True
-        assert second["ticket_reference"], "the answer turned this into a real incident"
+        assert second["ticket_reference"] == tracking_reference, (
+            "the same incident must not produce a second ticket"
+        )
 
     def test_a_medium_report_that_is_already_tracked_is_not_asked_again(
         self, client: TestClient, employee_headers

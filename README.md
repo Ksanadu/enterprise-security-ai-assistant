@@ -234,8 +234,16 @@ The workflow has **three tiers, one per risk band**, all decided in backend code
 | Risk | What happens |
 | ---- | ------------ |
 | **High / critical** | File a Security ticket, assign it to the security team, mark it `escalated` and flag it for a human, then record **both** `ticket.created` and `escalation.triggered` in the audit log. |
-| **Medium** | **Ask one clarifying question instead of filing.** The decisive fact is missing, so the assistant asks for it; nothing enters the queue until the answer says it should. |
+| **Medium** | **Ask one clarifying question, and track the report while asking.** The decisive fact is missing, so the assistant asks for it; the ticket it opens is `medium`, `open` and **not** flagged for a human, so the queue does not fill with unconfirmed incidents. Answering the question escalates that same ticket. |
 | **Low** | Self-service: the grounded, cited answer is the whole response. |
+
+Asking and tracking are different jobs, and conflating them lost reports. The clarify
+path used to hold its state in the single turn that produced it: if the user never
+answered - they asked something else instead - the report was never tracked anywhere,
+not in the queue, not on the dashboard, not re-surfaced, leaving an audit trail of a
+report that produced no outcome. The tracking ticket closes that hole, and the
+safety invariant is asserted in both directions: escalation always comes with a
+ticket, and a ticket *without* escalation is only ever the medium tracking tier.
 
 Re-verifying this phase against the requirement found four defects, all fixed:
 
@@ -254,8 +262,17 @@ field nobody reads is not an answer.
 
 * **The assistant files tickets itself.** High or critical risk creates a ticket owned by the
   security team, already in the `escalated` state and flagged as needing a person. Medium-risk
-  phishing and incident reports open a ticket without the mandatory human step. IT support
-  requests are only *suggested*.
+  phishing and incident reports open a ticket without the mandatory human step, tracked from the
+  moment they are reported. IT support requests are only *suggested*.
+* **A ticket a user raises is routed by what it is about.** The `category` decides the queue: the
+  security set is `security`, `incident`, `phishing`, `malware`, `ransomware`, `data_leak`,
+  `data_loss` and `access`, and everything else goes to the raiser's own team. A security report
+  is filed at `medium` and an IT request at `low` - never higher, because urgency is the security
+  team's judgement and the chat path is what raises severity when the assessment warrants it. The
+  request body cannot set `severity`, `owner_role`, `status`, `source` or `escalation_required` at
+  all. Before this, the UI posted `category: 'security'` for anything the assistant had not
+  classified as IT support, and every such report landed in the **IT** queue at **low** severity,
+  where the security team might never triage it.
 * **One incident, one ticket.** When the same conversation gets worse, the existing ticket is
   **escalated** - severity raised, status moved to `escalated` - rather than a second ticket
   being opened.
@@ -282,7 +299,12 @@ field nobody reads is not an answer.
 
 * **Aggregates, never content.** Every dashboard response is a count, an aggregate or an
   identifier. A dedicated test suite asserts that no conversation text, answer content,
-  document body or service secret can appear in any view.
+  document body or service secret can appear in any view. `GET /tickets/statistics` is *not* the
+  dashboard: it counts the tickets **the caller can see** (an employee's own reports, IT's own
+  queue, everything for the security team), it is counted in SQL over that same visibility scope
+  so the numbers can never disagree with the list beside them, and it has no page cap - the
+  earlier version tallied one page of at most 200 rows, silently truncating every figure past
+  that, oldest rows first.
 * **Headline metrics**: questions and escalations in the window, tickets needing a human and how
   many are still unacknowledged, access denials, blocked prompt-injection attempts, median time
   to acknowledge an escalated ticket, active users and live sessions.

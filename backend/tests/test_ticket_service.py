@@ -10,13 +10,14 @@ from __future__ import annotations
 import datetime as dt
 
 import pytest
-from sqlalchemy import select
+from sqlalchemy import func, select
 
 from app.core.enums import Role, Severity, TicketSource, TicketStatus
 from app.db.models import Ticket, TicketEvent, User
 from app.db.session import session_scope
 from app.services.ticket_service import (
     ALLOWED_TRANSITIONS,
+    MAX_PAGE_SIZE,
     REFERENCE_PREFIX,
     TicketService,
     TicketValidationError,
@@ -426,6 +427,65 @@ class TestStatistics:
         assert stats["requiring_human"] >= 1
         assert set(stats["by_status"]) == {status.value for status in TicketStatus}
         assert set(stats["by_severity"]) == {severity.value for severity in Severity}
+
+    def test_the_counts_agree_with_the_visible_list(self, schema, users, service) -> None:
+        # The numbers on the page and the rows beneath them come from one definition
+        # of "visible"; if they ever disagree, one of the two is lying to the user.
+        with session_scope() as session:
+            for role, user in users.items():
+                visible = service.list_visible(session, user=user, limit=200)
+                stats = service.statistics(session, user=user)
+                assert stats["total"] == len(visible), role
+                assert stats["open"] == sum(1 for ticket in visible if ticket.is_open), role
+                assert stats["requiring_human"] == sum(
+                    1 for ticket in visible if ticket.escalation_required
+                ), role
+
+    def test_a_page_cap_cannot_truncate_the_counts(self, schema, users, service) -> None:
+        """The bug this replaces: 200 tickets was the whole truth, silently.
+
+        `statistics` used to fetch `MAX_PAGE_SIZE` rows and count them in Python, so
+        past 200 tickets every figure was wrong - and wrong in a way nobody would
+        notice, because the page is ordered newest-first and it was the *oldest* rows
+        that stopped existing.
+        """
+        extra = 250
+        with session_scope() as session:
+            for index in range(extra):
+                service.create_ticket(
+                    session,
+                    title=f"Backlog item {index}",
+                    owner_role=Role.SECURITY,
+                    created_by=users["security"],
+                )
+            stats = service.statistics(session, user=users["security"])
+            counted = service.count_visible(session, user=users["security"])
+
+            raw_total = session.scalar(select(func.count()).select_from(Ticket))
+
+        assert extra > MAX_PAGE_SIZE, "the test must exceed the page cap to mean anything"
+        assert raw_total is not None and raw_total >= extra
+        assert stats["total"] == raw_total, "the count must not stop at one page"
+        assert counted == raw_total
+        assert sum(stats["by_status"].values()) == raw_total
+        assert sum(stats["by_severity"].values()) == raw_total
+
+    def test_the_counts_never_include_rows_the_caller_cannot_read(
+        self, schema, users, service
+    ) -> None:
+        with session_scope() as session:
+            baseline = service.statistics(session, user=users["employee"])["total"]
+            # Five tickets the employee has no claim on: owned by nobody in their
+            # scope and created by someone else.
+            for index in range(5):
+                service.create_ticket(
+                    session, title=f"Another employee's ticket {index}", created_by=None
+                )
+            after = service.statistics(session, user=users["employee"])["total"]
+            visible = service.list_visible(session, user=users["employee"], limit=MAX_PAGE_SIZE)
+
+        assert after == baseline, "unreadable rows must not move the counters"
+        assert after == len(visible)
 
     def test_seeded_tickets_have_a_timeline(self, schema, users, service) -> None:
         with session_scope() as session:

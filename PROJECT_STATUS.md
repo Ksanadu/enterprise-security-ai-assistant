@@ -98,13 +98,29 @@ independent defect register is `Reviewer Report.md`.
 - [x] Frontend follows: `MetaResponse` loses `ai`, the footer prints environment and version
       rather than the provider and index, and `ChatCapabilities` carries the new `retrieval` block.
 
+**Round 4 — tickets: routing, counting, and a loss-free clarify tier — DONE**
+
+- [x] P1-05 (Reviewer P1-5) — `statistics()` fetched at most `MAX_PAGE_SIZE` (200) rows and counted
+      them in Python, so past 200 tickets every figure was silently wrong (oldest rows first), and it
+      did the counting after moving rows over the wire. It is now SQL aggregates over the *same*
+      visibility predicate the list uses (`_visible_scope`), with no page cap. Verified live:
+      `statistics.total` equals the listed count for all three roles.
+- [x] P1-06 (Reviewer P1-6) — a self-raised ticket ignored `category` and always landed in the IT
+      queue at low severity, so an employee reporting a security concern filed it where the security
+      team might never triage it. The `category` now decides the queue (security set → security team,
+      `medium`; everything else → the raiser's own team, `low`), the neutral default replaces the old
+      `security` default, and the body still cannot set
+      `severity`/`owner_role`/`status`/`source`/`escalation_required`. Verified live.
+- [x] BUG-2 (handoff §8.1) — a medium-risk report whose clarifying question was never answered was
+      tracked nowhere at all. The report is now filed while the question is asked: a `medium`, `open`,
+      non-escalated ticket that the answer escalates if the news is worse. Verified live: the
+      tracking ticket survives an unrelated next turn and is visible to the security team.
+- [x] The escalation invariant is re-stated and asserted in both directions in the evaluation suite
+      (escalation always comes with a ticket; a ticket without escalation is only this tracking
+      tier), and `phish-003`'s expectation now records that a medium phishing report is tracked.
+
 **Scheduled** (severity order; one round per commit):
 
-- [ ] P1-05 (Reviewer P1-5) — ticket `statistics` capped at 200 rows and not queue-scoped. Round 4
-- [ ] P1-06 (Reviewer P1-6) — self-raised tickets ignore `category`, always IT/low, read-only.
-      Round 4
-- [ ] BUG-2 (handoff §8.1) — a medium-risk report whose clarification is never answered is never
-      tracked. Round 4
 - [ ] P1-07 (Reviewer P1-7) — dead and value-blind frontend assertions, no frontend coverage
       tooling, no CI. Round 5
 - [ ] Round 6 — documentation: the WRONG/drift items in `PROJECT_HANDOFF.md`, and committing the
@@ -112,10 +128,12 @@ independent defect register is `Reviewer Report.md`.
 
 **Decisions taken** (previously open questions):
 
-1. *Employee ticket statistics* — reads keep the documented "the creator always sees their own
-   ticket" policy, but **counts become queue-scoped and computed in SQL**: SECURITY counts
-   everything, IT counts its own queue, an employee never counts security-owned rows. Removes both
-   the 200-row truncation and the disclosure of security-queue state to a non-security role.
+1. *Ticket statistics* — counts are taken over the caller's **visibility scope** (employee: their own
+   reports; IT: their own plus the IT/employee queue; security: everything), computed as SQL
+   aggregates with **no page cap**, and documented as such — the numbers must agree with the list
+   rendered next to them, which a stricter "queue-only" reading would break. What is fixed is the
+   silent 200-row truncation and the fetch-then-count in Python. Reads keep the documented
+   "the creator always sees their own ticket" policy.
 2. *Blocked turns* — the guard decides whether the assistant **answers**, never whether a person is
    **told**. Refused turns are risk-assessed and escalated on their merits; the refusal text is
    unchanged; the guard's own block keeps a medium floor.
@@ -128,13 +146,16 @@ independent defect register is `Reviewer Report.md`.
 | Gate | Result |
 | --- | --- |
 | `scripts/check.ps1` (ruff, mypy, pytest, tsc, eslint, vitest, secret scan) | **exit 0** |
-| Backend `pytest -q` | **1468 passed, 1 skipped** (started at 1415/1) |
+| Backend `pytest -q` | **1475 passed, 1 skipped** (started at 1415/1) |
 | Backend coverage `--cov=app` | **95%** (4128 statements, 214 missed); `app/ai/llm.py` **84% → 98%** |
 | Frontend `npm test` | **59 passed** (2 files) |
 | `security`-marked tests | 1067 → re-measured in Round 5 |
 | `backend/scripts/demo.py` | **71 / 71 checks passed** (was 67; SCENARIO 0 now demonstrates the disclosure boundary and the search limiter) |
 | Disclosure boundary (live) | anonymous `/meta` carries no AI-stack key; anonymous `/chat/capabilities` is 401; rule counts absent for employee, present for security |
 | `/knowledge/search` throttle (live) | 30 rapid searches → 20 × 200, then 429 from request 21 (same budget as chat, separate key) |
+| Ticket routing (live) | `category=security`/`phishing` → `SEC-…`/security/medium; `it`/`other` → `IT-…`/it/low; body `severity`/`owner_role`/`status` ignored |
+| Ticket counts (live) | `statistics.total` == listed count for employee, IT and security; no page cap |
+| Medium-report tracking (live) | `risk=medium`, `action=clarify`, ticket opened, `escalated=false`; the ticket survives a next turn that asks something else |
 | Evaluation set (40 questions, live API) | intent 40/40, risk 40/40, escalation 40/40, ticket 40/40, blocked 40/40, **expected document 28/28** (was 25/28 before the config realignment) |
 | Escalation corpus | **52 / 52** S1/S2 phrasings escalate; 20 legitimate questions do not |
 | Injection corpus | **31 / 31** blocked; 12 document requests + 3 reported requests not blocked |

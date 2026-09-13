@@ -282,8 +282,8 @@ class TestUserRaisedTickets:
         )
         assert response.status_code == 201, response.text
         body = response.json()
-        # The reference prefix names the *owning queue*, not the raiser: an
-        # employee's request is an IT ticket.
+        # The reference prefix names the *owning queue*, not the raiser: with no
+        # security category, an employee's request is an IT ticket.
         assert body["reference"].startswith("IT-")
         assert body["source"] == "user_request"
         assert body["status"] == "open"
@@ -292,13 +292,65 @@ class TestUserRaisedTickets:
     def test_the_owning_team_is_derived_not_chosen(
         self, client: TestClient, employee_headers
     ) -> None:
-        """A user cannot file into the security queue."""
+        """A user cannot file into the security queue by claiming a role or a severity.
+
+        They *can* route a ticket there by reporting a security matter, which is the
+        point: the queue is chosen by what the ticket is about, never by what the
+        caller asserts about themselves.
+        """
         body = client.post(
             "/api/v1/tickets",
             headers=employee_headers,
-            json={"title": "Attempted escalation", "description": "x", "owner_role": "security"},
+            json={
+                "title": "Attempted escalation",
+                "description": "x",
+                "category": "it",
+                "owner_role": "security",
+                "severity": "critical",
+                "status": "escalated",
+                "escalation_required": True,
+            },
         ).json()
-        assert body["owner_role"] == "it"
+        assert body["owner_role"] == "it", "the body cannot name the owning team"
+        assert body["severity"] == "low", "the body cannot set the urgency"
+        assert body["status"] == "open"
+        assert body["escalation_required"] is False
+
+    def test_a_security_category_routes_to_the_security_queue(
+        self, client: TestClient, employee_headers
+    ) -> None:
+        """The dead end this fixes: the UI posts `security` for anything that is not
+        an IT request, and every such report used to land in the IT queue at low
+        severity, where the security team might never triage it."""
+        response = client.post(
+            "/api/v1/tickets",
+            headers=employee_headers,
+            json={
+                "title": "A supplier asked me for my password",
+                "description": "They emailed asking me to confirm my credentials.",
+                "category": "security",
+            },
+        )
+        assert response.status_code == 201, response.text
+        body = response.json()
+        assert body["reference"].startswith("SEC-")
+        assert body["owner_role"] == "security"
+        assert body["severity"] == "medium", "a security report is not a routine request"
+        assert body["category"] == "security"
+
+    def test_phishing_and_incident_categories_are_security_too(
+        self, client: TestClient, employee_headers
+    ) -> None:
+        # The UI sends the classification it was given, not always the word
+        # "security", so the routing has to understand both.
+        for category in ("phishing", "incident", "malware", "data_leak"):
+            body = client.post(
+                "/api/v1/tickets",
+                headers=employee_headers,
+                json={"title": f"Report ({category})", "description": "x", "category": category},
+            ).json()
+            assert body["owner_role"] == "security", category
+            assert body["severity"] == "medium", category
 
     def test_a_short_title_is_rejected(self, client: TestClient, employee_headers) -> None:
         response = client.post("/api/v1/tickets", headers=employee_headers, json={"title": "x"})

@@ -32,11 +32,29 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/tickets", tags=["tickets"])
 
-#: Which team a self-raised ticket goes to, by the raiser's role.
+#: Which team a self-raised ticket goes to, by the raiser's role. Used when the
+#: category does not name a security matter.
 OWNER_ROLE_FOR_RAISER: dict[Role, Role] = {
     Role.EMPLOYEE: Role.IT,
     Role.IT: Role.IT,
     Role.SECURITY: Role.SECURITY,
+}
+
+#: Categories a user raises that belong to the security queue. The UI sends
+#: `security` for anything that is not an IT request, and `phishing`/`incident`
+#: when the assistant classified the message that way.
+SECURITY_CATEGORIES = frozenset(
+    {"security", "incident", "phishing", "malware", "ransomware", "data_leak", "data_loss", "access"}
+)
+
+#: Severity for a ticket a user raises themselves. Deliberately never high or
+#: critical: urgency is the security team's judgement, not the reporter's, and the
+#: chat path is what raises severity when the assessment warrants it. A security
+#: report is medium rather than low, though - it is not a routine request.
+SEVERITY_FOR_SELF_RAISED = {
+    Role.SECURITY: Severity.MEDIUM,
+    Role.IT: Severity.LOW,
+    Role.EMPLOYEE: Severity.LOW,
 }
 
 
@@ -132,23 +150,40 @@ def create_ticket(
 ) -> TicketDetail:
     """Create a ticket the user asked for.
 
-    The owning team is derived from the caller's role, so a user cannot file a
-    ticket into a queue they do not belong to.
+    The owning team comes from the **category**, and the severity from the owning
+    team - never from the request body, which still cannot set either. Deriving the
+    owner from the *raiser's role* alone was a workflow dead end on the product's
+    flagship path: the UI posts `category: 'security'` for anything the assistant
+    did not classify as IT support, and an employee reporting a security concern got
+    an IT queue, `low` severity, and `can_update: false` - so the security team might
+    never triage it and the reporter could not follow it up.
+
+    What a caller cannot do is unchanged: `severity`, `owner_role`, `status`,
+    `source` and `escalation_required` in the body are ignored (the request schema
+    does not even declare them), so self-inflicted urgency is impossible.
     """
     service = get_ticket_service(request)
+    category = (payload.category or "").strip().lower()
+    is_security = category in SECURITY_CATEGORIES
+    owner_role = Role.SECURITY if is_security else OWNER_ROLE_FOR_RAISER[user.role]
+
     ticket = service.create_ticket(
         session,
         title=payload.title,
         description=payload.description,
-        category=payload.category,
-        severity=Severity.LOW,
+        category=category or "other",
+        severity=Severity.MEDIUM if is_security else SEVERITY_FOR_SELF_RAISED[user.role],
         status=TicketStatus.OPEN,
-        owner_role=OWNER_ROLE_FOR_RAISER[user.role],
+        owner_role=owner_role,
         source=TicketSource.USER_REQUEST,
         created_by=user,
         escalation_required=False,
         automated=False,
-        note="Raised by the user.",
+        note=(
+            "Raised by the user as a security report."
+            if is_security
+            else "Raised by the user."
+        ),
     )
     record_audit(
         session,
@@ -156,7 +191,12 @@ def create_ticket(
         actor=user,
         resource_type="ticket",
         resource_id=ticket.reference,
-        detail={"source": ticket.source.value, "owner_role": ticket.owner_role.value},
+        detail={
+            "source": ticket.source.value,
+            "owner_role": ticket.owner_role.value,
+            "category": ticket.category,
+            "severity": ticket.severity.value,
+        },
         ip_address=client_ip(request),
         commit=True,
     )

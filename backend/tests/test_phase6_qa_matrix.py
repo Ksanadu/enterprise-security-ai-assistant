@@ -377,7 +377,13 @@ class TestTheTicketSide:
         # The failure itself is audited, so it can be reconciled later.
         assert "workflow.failed" in audit_actions()
 
-    def test_the_medium_tier_asks_instead_of_filing(self, client: TestClient) -> None:
+    def test_the_medium_tier_asks_and_tracks_the_report(self, client: TestClient) -> None:
+        """Asking is not tracking: the report is filed while the question is asked.
+
+        The clarify path used to hold its state in the single turn that produced it,
+        so a report whose question was never answered was never tracked anywhere - an
+        audit trail showing a report that produced no outcome.
+        """
         before = ticket_count()
         headers = sign_in(client, "employee")
         payload = ask(
@@ -390,7 +396,17 @@ class TestTheTicketSide:
         assert payload["risk_level"] == "medium"
         assert payload["workflow_action"] == "clarify"
         assert payload["clarifying_question"]
-        assert payload["ticket_reference"] is None
         assert payload["human_escalation"] is False
-        assert ticket_count() == before, "the medium tier files nothing yet"
+        assert payload["ticket_reference"], "the report must be tracked from the start"
+        assert ticket_count() == before + 1, "one tracking ticket, not a page for a human"
         assert "workflow.clarification.requested" in audit_actions()
+        assert "ticket.created" in audit_actions()
+
+        # The tracking ticket is medium and open: the queue is not filled with
+        # unconfirmed incidents, and the answer escalates it if the news is worse.
+        ticket = client.get(
+            f"/api/v1/tickets/{payload['ticket_reference']}", headers=headers
+        ).json()
+        assert ticket["severity"] == "medium"
+        assert ticket["status"] == "open"
+        assert ticket["escalation_required"] is False

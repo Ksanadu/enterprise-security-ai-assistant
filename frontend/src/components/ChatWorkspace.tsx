@@ -63,9 +63,9 @@ export function ChatWorkspace({ user, onSignOut, maxMessageLength = 2000 }: Chat
         '\n\nReason: the knowledge base answer did not resolve the problem.',
       ].join('')
 
-      // The owning queue is the server's decision, from the caller's role. The
-      // category is only a label, but it should still agree with what the answer
-      // was about rather than always saying "security".
+      // The category decides the owning queue on the server: a security category
+      // goes to the security team, anything else to the raiser's own team. The
+      // severity is the server's decision either way - the client never sends one.
       const category = message.payload?.intent === 'it_support' ? 'it' : 'security'
 
       void chat.raiseTicket(message.id, title, description, category)

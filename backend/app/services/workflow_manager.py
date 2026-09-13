@@ -157,9 +157,15 @@ class WorkflowManager:
             )
 
         # 2. A medium-risk report is not yet an actionable incident: the fact that
-        #    decides its severity is missing. Ask for it rather than filing, which
-        #    is both what a duty analyst does first and what keeps the queue free
-        #    of clicks that turn out to have been harmless.
+        #    decides its severity is missing. Ask for it - but *file the report* while
+        #    asking, because asking and tracking are different jobs.
+        #
+        #    The clarify path used to hold its state in the turn that produced it and
+        #    nothing else. If the user never answered - they asked something else - the
+        #    report was never tracked anywhere: not in the queue, not on the dashboard,
+        #    not re-surfaced, leaving an audit trail of a report that produced no
+        #    outcome. One incident still produces one ticket, so answering the question
+        #    escalates *this* ticket rather than opening a second one.
         if risk.level is RiskLevel.MEDIUM and intent in INCIDENT_INTENTS:
             if existing_ticket is not None:
                 # Already being tracked; a question is not needed to re-open it.
@@ -171,13 +177,15 @@ class WorkflowManager:
                 action="clarify",
                 reason=(
                     "a medium-risk report is missing the detail that decides whether "
-                    "it needs a ticket"
+                    "it needs a person, so it is tracked while the question is asked"
                 ),
                 title=title,
+                description=self._description(analysis, question),
                 category=category,
                 severity=Severity.MEDIUM,
                 owner_role=Role.SECURITY,
                 escalation_required=False,
+                initial_status=TicketStatus.OPEN,
                 clarifying_question=self._clarifying_question(analysis),
             )
 
@@ -308,9 +316,48 @@ class WorkflowManager:
             )
 
         if decision.action == "clarify":
-            # Not a ticket, but still a decision worth recording: the follow-up
-            # answer is what determines whether this becomes an incident, and a
-            # reviewer needs to see that the system asked rather than ignored it.
+            # The report is filed *and* a question is asked. Tracking used to start
+            # only if the user answered, so a report that was never followed up
+            # vanished - no ticket, no queue entry, nothing on the dashboard.
+            ticket = self._tickets.create_ticket(
+                session,
+                title=decision.title,
+                description=decision.description,
+                severity=decision.severity,
+                status=decision.initial_status,
+                category=decision.category,
+                owner_role=decision.owner_role,
+                source=TicketSource.AI_AUTO,
+                created_by=user,
+                conversation_id=conversation_id,
+                related_query=question,
+                escalation_required=False,
+                automated=True,
+                note=(
+                    "Created automatically by the assistant, tracked while a "
+                    "clarifying question is asked. "
+                    f"{decision.reason}"
+                ),
+            )
+            record_audit(
+                session,
+                action=AuditAction.TICKET_CREATED,
+                actor=user,
+                resource_type="ticket",
+                resource_id=ticket.reference,
+                detail={
+                    "severity": ticket.severity.value,
+                    "status": ticket.status.value,
+                    "owner_role": ticket.owner_role.value,
+                    "source": ticket.source.value,
+                    "escalation_required": False,
+                    "conversation_id": conversation_id,
+                    "tracked_while_clarifying": True,
+                },
+            )
+            # Not a ticket *decision* worth hiding either: the follow-up answer is
+            # what decides whether this becomes an incident, and a reviewer needs to
+            # see that the system asked rather than ignored it.
             record_audit(
                 session,
                 action=AuditAction.WORKFLOW_CLARIFICATION_REQUESTED,
@@ -322,8 +369,10 @@ class WorkflowManager:
                     "severity": decision.severity.value,
                     "risk_level": analysis.risk.level.value,
                     "would_own": decision.owner_role.value,
+                    "ticket_reference": ticket.reference,
                 },
             )
+            return ticket
         return None
 
     # -- text -------------------------------------------------------------
