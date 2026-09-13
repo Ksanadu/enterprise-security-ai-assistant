@@ -163,10 +163,41 @@ independent defect register is `Reviewer Report.md`.
 - [x] `PROJECT_HANDOFF.md` and `Reviewer Report.md` are now **committed** — they were untracked, so
       a fresh clone did not contain the handoff or the review it responds to.
 
+## CI incident — three red runs, and what they were worth
+
+The workflow added in R5 failed on its first three runs (R5, R6 and the CI-fix commit) and mailed
+a failure each time. **Root cause:** `test_deployment_assets.py::TestComposeSemantics` skips when
+there is no `docker` binary, and this development machine has none - so the test had never actually
+run here. GitHub's Windows runners ship Docker 29.7.2 and Compose 2.40.3, so there it runs, and
+`docker-compose.yml` declares `env_file: - .env` while `.env` is gitignored and therefore absent in
+CI. Compose treats a missing env file as an error, so the one environment able to validate the
+compose file was the one environment with nothing to validate it against: deterministic, CI-only,
+and invisible from here.
+
+**Fixed** (`c3da181`): the test now probes `docker compose version` first (an unusable plugin is an
+environment problem, and skips with that reason, while a malformed compose file still fails), and
+materialises `.env` from the committed template for the duration of the check when it is missing -
+removing it afterwards, and only when it created it. The workflow also performs the documented
+`Copy-Item .env.example .env` setup step. Verified against a docker shim in all three states
+(env present → pass, env absent → pass and clean up, plugin unusable → skip).
+
+**Green:** run [34761249297](https://github.com/Ksanadu/enterprise-security-ai-assistant/actions/runs/34761249297)
+on `c3da181` — conclusion `success`, gate step 509s.
+
+**Two things learned, both now in the code rather than in a lesson:**
+
+1. A pipeline that says only `Process completed with exit code 1` is barely better than no pipeline.
+   `check.ps1` now prints a per-gate result table and, in Actions, emits an `::error::` annotation
+   naming each failing gate - visible on the commit page and readable through the Checks API
+   without downloading a log, which is how this was diagnosed without log access.
+2. The failure was in the *test's preconditions*, not in the product: it conflated "a docker binary
+   exists", "the compose plugin works" and "the operator's env file exists", and reported all three
+   as "the compose file is invalid". A test that cannot run here is a test that has never been
+   verified - the same lesson as the coverage omit and the mock provider, in a third costume.
+
 ## What remains
 
 Not defects in the code - the confirmed defect list is empty - but the honest limits:
-
 - [ ] **Acceptance criterion §9.10 is the only unproven one**: `docker compose up` has never run
       (no container runtime on the development machine). Everything else is verified by execution.
 - [ ] Answer quality against a real provider is unmeasured (the *request path* is now tested; the
@@ -205,7 +236,7 @@ every round, in the same commit as the change it describes.
 | Frontend `npm test` | **59 passed** (2 files) |
 | Frontend coverage | **91.4% statements / 80.4% branches / 74.4% functions**, thresholds 85 / 75 / 70 enforced |
 | `security`-marked tests | **1110** of 1476 collected (was 1067 of 1416) |
-| CI | `.github/workflows/ci.yml` runs the whole gate on push to `main` and on pull requests |
+| CI | `.github/workflows/ci.yml` runs the whole gate on push to `main` and on pull requests — **green** on `c3da181` ([run 34761249297](https://github.com/Ksanadu/enterprise-security-ai-assistant/actions/runs/34761249297)) |
 | `backend/scripts/demo.py` | **71 / 71 checks passed** (was 67; SCENARIO 0 now demonstrates the disclosure boundary and the search limiter) |
 | Disclosure boundary (live) | anonymous `/meta` carries no AI-stack key; anonymous `/chat/capabilities` is 401; rule counts absent for employee, present for security |
 | `/knowledge/search` throttle (live) | 30 rapid searches → 20 × 200, then 429 from request 21 (same budget as chat, separate key) |
@@ -233,5 +264,7 @@ handoff states.
 
 ## Last Verified
 
-2026-09-13 — Round 1, on Windows PowerShell 5.1, Python 3.12.10, Node 24.19.0.
+2026-09-13 — Rounds 1–6 locally, plus the CI fix verified on the runner
+(run [34761249297](https://github.com/Ksanadu/enterprise-security-ai-assistant/actions/runs/34761249297): `success`).
+Local environment: Windows PowerShell 5.1, Python 3.12.10, Node 24.19.0.
 (`pwsh` is not installed on this machine; use `powershell -ExecutionPolicy Bypass -File scripts\check.ps1`.)

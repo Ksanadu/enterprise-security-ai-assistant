@@ -768,7 +768,11 @@ Backend and frontend Dockerfiles are in `backend/Dockerfile` and `frontend/Docke
 ### 9.2 What you must do before it is deployable
 
 1. **Run `docker compose up` once.** Acceptance criterion §9.10 is unproven (§5.5). Nothing else
-   in this section matters until this works.
+   in this section matters until this works. Run `Copy-Item .env.example .env` first: the compose
+   file declares `env_file: - .env` for the backend, and Compose treats a missing env file as an
+   error, so without it the command fails before it starts building - which is also why the
+   deployment-asset test skips rather than fails on a machine that has no Docker, and why CI now
+   performs that copy before running the gate.
 2. **Set `AUTH_SECRET_KEY`** to a real random value. The example value is a placeholder.
 3. **Set `TRUSTED_PROXY_COUNT`** to the true number of proxies in front of the backend. It
    defaults to `0`, which is correct only if nothing proxies. Behind nginx, leaving it at `0`
