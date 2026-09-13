@@ -46,7 +46,7 @@ All ten phases are complete.
 | [docs/DEMO.md](docs/DEMO.md) | How to run the demo, a presenter's script, every scenario with its expected output, and acceptance-criteria traceability |
 | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | How the system is built and why: the pipeline, the authorization design, the data model, and the security model threat by threat |
 | [backend/knowledge_base/README.md](backend/knowledge_base/README.md) | The knowledge base document metadata contract |
-| `backend/scripts/demo.py` | The demonstration, executable and self-verifying (67 checks) |
+| `backend/scripts/demo.py` | The demonstration, executable and self-verifying (71 checks) |
 
 ### What works today
 
@@ -366,7 +366,7 @@ The set immediately earned its keep. Writing it exposed a set of real defects:
 * **`backend/scripts/demo.py`** is the demo *and* its documentation. It walks all four specification
   scenarios, the role-scoping comparison, the mandatory end-to-end flow from section 10, what the
   system refuses to do, and the access-control boundary - printing the real values the API returns
-  and a verdict table. Exit code 0 only when all **67 checks** pass, so it works as a smoke test
+  and a verdict table. Exit code 0 only when all **71 checks** pass, so it works as a smoke test
   against a deployed environment too.
 * It is **verified, not just written**: `tests/test_demo_script.py` runs the same `run_demo` entry
   point against an in-process application, so the demo cannot drift away from the product.
@@ -480,7 +480,7 @@ stale cached index). A mismatch is logged as a security event and the chunk is d
 │   │                             #   response generator, turn analysis
 │   ├── knowledge_base/           # 12 simulated documents + their metadata contract
 │   ├── scripts/
-│   │   ├── demo.py               # the executable demonstration (67 checks)
+│   │   ├── demo.py               # the executable demonstration (71 checks)
 │   │   └── update_evaluation_expectations.py
 │   ├── tests/                    # 1415 tests
 │   └── requirements*.txt

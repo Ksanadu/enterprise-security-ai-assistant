@@ -30,11 +30,40 @@ class TestMeta:
         body = response.json()
         assert body["environment"] == "test"
         assert set(body["roles"]) == {"employee", "it", "security"}
-        assert body["ai"]["vector_store"] == "memory"
+        assert body["features"]["demo_login"] is True
 
         raw = response.text.lower()
         for forbidden in ("secret", "api_key", "apikey", "password", "token"):
             assert forbidden not in raw
+
+    def test_meta_carries_no_ai_stack_fingerprint(self, client: TestClient) -> None:
+        """An anonymous caller must not be handed a target list.
+
+        The response used to include the provider, the model, the embedding backend,
+        the vector store, the retrieval `top_k`, the environment and the seed state -
+        which tells an attacker exactly which surfaces to attack and how, and
+        `environment: development` advertises that demo credentials are live. That
+        detail now requires a token (`/chat/capabilities`), and the rule counts
+        inside it require the security role.
+        """
+        body = client.get("/api/v1/meta").json()
+
+        assert "ai" not in body
+        assert set(body) == {"app_name", "version", "environment", "features", "roles"}
+        raw = client.get("/api/v1/meta").text.lower()
+        for fingerprint in (
+            "llm_provider",
+            "llm_model",
+            "embedding_provider",
+            "vector_store",
+            "retrieval_top_k",
+            "retrieval",
+            "gpt-4o",
+            "mock",
+            "tfidf",
+            "faiss",
+        ):
+            assert fingerprint not in raw, f"/meta leaks {fingerprint!r} to anonymous callers"
 
     def test_root_endpoint_points_at_health(self, client: TestClient) -> None:
         response = client.get("/")

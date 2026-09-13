@@ -53,9 +53,7 @@ export function App() {
         <span>{config.appTitle}</span>
         <span className="app__footer-meta">
           {meta
-            ? `${meta.environment} · ${String(meta.ai.llm_provider)} generator · ${String(
-                meta.ai.vector_store,
-              )} index`
+            ? `${meta.environment} · ${meta.app_name} v${meta.version}`
             : backendError
               ? 'backend unreachable'
               : 'connecting…'}

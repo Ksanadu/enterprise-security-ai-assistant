@@ -58,7 +58,9 @@ class SlidingWindowLimiter:
             if len(events) >= self._limit:
                 retry_after = max(1, int(self._window - (now - events[0])) + 1)
                 raise RateLimitError(
-                    "Too many requests. Please wait before sending another message.",
+                    # Deliberately not "another message": the same limiter now covers
+                    # the retrieval endpoint too, which sends no message.
+                    "Too many requests. Please wait before trying again.",
                     details={"retry_after_seconds": retry_after, "limit": self._limit},
                 )
             events.append(now)

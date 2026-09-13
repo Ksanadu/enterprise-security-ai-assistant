@@ -200,34 +200,12 @@ class Demo:
         the limit is a security control, so the answer is to *respect* it and wait
         for the window the server reports, not to raise or bypass it.
         """
-        attempts = 0
-        while True:
-            response = self._client.post(
-                f"/api/v1/chat/conversations/{conversation_id}/messages",
-                headers=self._headers(role),
-                json={"content": question},
-            )
-            if response.status_code != 429:
-                break
-
-            attempts += 1
-            if attempts > MAX_RATE_LIMIT_WAITS:
-                raise SystemExit(
-                    f"still rate limited after {MAX_RATE_LIMIT_WAITS} waits; raise "
-                    "CHAT_RATE_LIMIT_PER_MINUTE or wait a few minutes before running "
-                    "the demo"
-                )
-
-            wait = _retry_after_seconds(response)
-            self.say(
-                f"      (rate limited by the chat endpoint; waiting {wait:.0f}s for the "
-                "window to reopen - the limit is a security control, not an obstacle "
-                "to route around)"
-            )
-            time.sleep(wait)
-
-        response.raise_for_status()
-        return response.json()
+        return self._post_waiting_out_rate_limit(
+            role,
+            f"/api/v1/chat/conversations/{conversation_id}/messages",
+            {"content": question},
+            what="the chat endpoint",
+        )
 
     def get(self, role: str, path: str, **params: Any) -> httpx.Response:
         return self._client.get(path, headers=self._headers(role), params=params or None)
@@ -244,9 +222,41 @@ class Demo:
         return self._client.patch(path, headers=self._headers(role), json=payload)
 
     def search(self, role: str, query: str) -> dict[str, Any]:
-        response = self._client.post(
-            "/api/v1/knowledge/search", headers=self._headers(role), json={"query": query}
+        """Retrieval preview, on the same terms as a chat turn.
+
+        This endpoint embeds the query and runs a vector search, so it is throttled
+        like the chat endpoint - and the demo has to respect that the same way, or a
+        second run inside the same minute fails.
+        """
+        return self._post_waiting_out_rate_limit(
+            role, "/api/v1/knowledge/search", {"query": query}, what="the search endpoint"
         )
+
+    def _post_waiting_out_rate_limit(
+        self, role: str, path: str, payload: dict[str, Any], *, what: str
+    ) -> dict[str, Any]:
+        attempts = 0
+        while True:
+            response = self._client.post(path, headers=self._headers(role), json=payload)
+            if response.status_code != 429:
+                break
+
+            attempts += 1
+            if attempts > MAX_RATE_LIMIT_WAITS:
+                raise SystemExit(
+                    f"still rate limited after {MAX_RATE_LIMIT_WAITS} waits; raise "
+                    "CHAT_RATE_LIMIT_PER_MINUTE or wait a few minutes before running "
+                    "the demo"
+                )
+
+            wait = _retry_after_seconds(response)
+            self.say(
+                f"      (rate limited by {what}; waiting {wait:.0f}s for the window to "
+                "reopen - the limit is a security control, not an obstacle to route "
+                "around)"
+            )
+            time.sleep(wait)
+
         response.raise_for_status()
         return response.json()
 
@@ -366,18 +376,57 @@ def _scenario_startup(demo: Demo) -> None:
     demo.detail(f"checks: {body.get('checks')}")
     demo.check("health endpoint reports ok", health.status_code == 200 and body["status"] == "ok")
 
-    demo.step("0.2", "What is the system configured to do?")
+    demo.step("0.2", "What may an anonymous caller learn?")
     meta = demo.public_get("/api/v1/meta")
     demo.detail(f"environment={meta['environment']} version={meta['version']}")
-    demo.detail(f"llm={meta['ai']['llm_provider']}/{meta['ai']['llm_model']}")
-    demo.detail(f"embeddings={meta['ai']['embedding_provider']} store={meta['ai']['vector_store']}")
     demo.detail(f"roles={meta['roles']}")
     demo.check("no secret is exposed by /meta", "key" not in str(meta).lower())
+    # The AI stack fingerprint used to be here, readable without a token: provider,
+    # model, embedding backend, vector store and retrieval top_k. It told an
+    # anonymous caller which surfaces to attack and how.
+    demo.check(
+        "the AI stack is not disclosed without a token",
+        not ({"ai", "llm_provider", "llm_model", "embedding_provider", "vector_store"} & set(meta)),
+        f"keys={sorted(meta)}",
+    )
 
     demo.step("0.3", "Three people sign in, one per role.")
     for role in ("employee", "it", "security"):
         demo.sign_in(role)
         demo.detail(f"{ROLE_LABELS[role]:<14} {DEMO_ACCOUNTS[role]}")
+
+    demo.step("0.4", "Which pipeline is answering - and who may see how it works?")
+    employee_caps = demo.get("employee", "/api/v1/chat/capabilities").json()
+    security_caps = demo.get("security", "/api/v1/chat/capabilities").json()
+    demo.detail(
+        f"generator={employee_caps['provider']['provider']}"
+        f"/{employee_caps['provider']['model']} "
+        f"store={employee_caps['retrieval']['vector_store']} "
+        f"top_k={employee_caps['retrieval']['top_k']}"
+    )
+    demo.detail(
+        f"employee sees: guard={'enabled' if employee_caps['pipeline']['guard'].get('enabled') else 'off'}"
+        f" escalation_levels={employee_caps['pipeline']['risk']['escalation_levels']}"
+    )
+    demo.detail(
+        f"security sees: guard rules={security_caps['pipeline']['guard'].get('blocking_rules')} "
+        f"intent rules={security_caps['pipeline']['intent'].get('rule_count')} "
+        f"risk rules={security_caps['pipeline']['risk'].get('rule_count')}"
+    )
+    demo.check(
+        "the pipeline is described to an authenticated caller",
+        employee_caps["provider"]["provider"] and employee_caps["retrieval"]["top_k"] >= 1,
+    )
+    demo.check(
+        "rule counts are not disclosed to an ordinary role",
+        "rule_count" not in str(employee_caps["pipeline"])
+        and "blocking_rules" not in str(employee_caps["pipeline"]),
+    )
+    demo.check(
+        "the security role still sees the counts it operates with",
+        security_caps["pipeline"]["guard"]["blocking_rules"] > 0
+        and security_caps["pipeline"]["intent"]["rule_count"] > 0,
+    )
 
 
 # -- A. security knowledge query --------------------------------------------

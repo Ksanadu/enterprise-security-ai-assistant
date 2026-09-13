@@ -37,14 +37,24 @@ export interface HealthResponse {
   checks: Record<string, string>
 }
 
-/** Non-sensitive AI pipeline configuration reported by `GET /api/v1/meta`. */
-export interface AiConfig {
-  llm_provider: string
-  llm_model: string
-  llm_configured: boolean
-  embedding_provider: string
+/**
+ * Which generator answers, and which index is searched.
+ *
+ * Reported by the *authenticated* `GET /api/v1/chat/capabilities`. It used to come
+ * from `/api/v1/meta`, which needs no token - so the provider, model, embedding
+ * backend, vector store and retrieval `top_k` were readable by anyone, and
+ * `environment: development` advertised that demo credentials were live.
+ * Anonymous callers now get name, version, environment and feature flags only.
+ */
+export interface PipelineInfo {
+  provider: string
+  model: string
+  offline: boolean
+}
+
+export interface RetrievalInfo {
   vector_store: string
-  retrieval_top_k: number
+  top_k: number
 }
 
 export interface AppFeatures {
@@ -57,7 +67,6 @@ export interface MetaResponse {
   version: string
   environment: string
   features: AppFeatures
-  ai: AiConfig
   roles: Role[]
 }
 
@@ -319,6 +328,9 @@ export interface ChatCapabilities {
   provider: { provider: string; model: string; offline: boolean }
   knowledge_ready: boolean
   categories: Record<string, number>
+  /** Added when the AI-stack fingerprint moved off the anonymous `/meta`. */
+  retrieval?: RetrievalInfo
+  pipeline?: Record<string, unknown>
 }
 
 export function isErrorEnvelope(value: unknown): value is ErrorEnvelope {

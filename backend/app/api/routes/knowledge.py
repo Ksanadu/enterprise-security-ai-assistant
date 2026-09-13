@@ -12,7 +12,14 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, Request
 
-from app.api.deps import AppSettings, CurrentUser, DbSession, client_ip, require_roles
+from app.api.deps import (
+    AppSettings,
+    CurrentUser,
+    DbSession,
+    client_ip,
+    per_user_limiter,
+    require_roles,
+)
 from app.core.enums import AuditOutcome, Role
 from app.core.errors import NotFoundError, ValidationError
 from app.db.models import User
@@ -130,7 +137,18 @@ def search(
 
     This endpoint exists to make the RBAC filter observable: the same query
     returns different sources for different roles.
+
+    It embeds the query and runs a vector search - the same expensive primitive as
+    a chat turn - so it is throttled on the same terms. It used to be unmetered
+    while the chat endpoint beside it was limited, which made the limit cover one of
+    two equivalent routes: 60 searches in under a second returned 60 x 200 with no
+    429, and with a hosted embedding provider that is an unmetered path to a bill.
     """
+    # Per user, before any embedding work, exactly like the chat endpoint.
+    per_user_limiter(
+        request, name="knowledge_search_limiter", limit=settings.chat_rate_limit_per_minute
+    ).check(f"knowledge_search:{user.id}")
+
     if len(payload.query) > settings.max_query_length:
         raise ValidationError(
             f"Query exceeds the maximum length of {settings.max_query_length} characters."

@@ -28,6 +28,7 @@ from app.db.models import User
 from app.db.session import get_db
 from app.security.audit import AuditAction, record_audit
 from app.security.client_address import resolve_client_address
+from app.security.rate_limit import SlidingWindowLimiter
 from app.security.sessions import get_active_session
 from app.services.auth_service import get_user_by_id
 
@@ -131,6 +132,22 @@ def require_roles(*allowed: Role):
         return user
 
     return _dependency
+
+
+def per_user_limiter(request: Request, *, name: str, limit: int) -> SlidingWindowLimiter:
+    """One in-process limiter per (application, name), created on first use.
+
+    Every endpoint that embeds a query and runs a vector search is the *same*
+    expensive primitive, so they must be throttled alike - a limiter that covers one
+    of two equivalent routes is not a control, it is a control-shaped decoration.
+    Each endpoint gets its own instance so the budgets do not silently share a
+    bucket, and each is keyed by user id at the call site.
+    """
+    limiter = getattr(request.app.state, name, None)
+    if limiter is None:
+        limiter = SlidingWindowLimiter(limit=limit)
+        setattr(request.app.state, name, limiter)
+    return limiter
 
 
 def get_db_session() -> Iterator[Session]:  # re-export for scripts/tests

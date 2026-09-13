@@ -21,7 +21,7 @@ cd backend
 ```
 
 It walks every scenario below against the **running** system and prints what the API actually
-returns, then a verdict table. Exit code is 0 only when all 67 checks pass, so it doubles as a smoke
+returns, then a verdict table. Exit code is 0 only when all 71 checks pass, so it doubles as a smoke
 test against a deployed environment:
 
 ```powershell

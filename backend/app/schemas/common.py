@@ -29,11 +29,21 @@ class HealthResponse(BaseModel):
 
 
 class MetaResponse(BaseModel):
-    """Public, non-sensitive view of the running configuration."""
+    """What an *unauthenticated* caller may know about this deployment.
+
+    Deliberately small. This endpoint needs no token, so everything here is public:
+    the application name, its version, the environment and whether demo login is
+    available (the sign-in screen has to know). The AI stack fingerprint that used
+    to be here - provider, model, embedding backend, vector store and retrieval
+    `top_k` - is gone. It told an anonymous caller exactly which surfaces to attack
+    and how, and `environment: development` advertised that demo credentials were
+    live. Operational detail now sits behind authentication, in
+    `GET /api/v1/chat/capabilities`, and the rule counts inside it are visible only
+    to the security role.
+    """
 
     app_name: str
     version: str
     environment: str
     features: dict[str, bool] = Field(default_factory=dict)
-    ai: dict[str, Any] = Field(default_factory=dict)
     roles: list[str] = Field(default_factory=list)

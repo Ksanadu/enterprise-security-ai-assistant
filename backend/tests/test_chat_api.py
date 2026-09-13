@@ -368,6 +368,44 @@ class TestCapabilities:
         for forbidden in ("api_key", "secret", "password", "token"):
             assert forbidden not in raw
 
+    def test_the_rule_counts_are_for_the_security_role_only(
+        self, client: TestClient, employee_headers, security_headers
+    ) -> None:
+        """Counts describe the size of the gate, so they are operational detail.
+
+        An ordinary caller gets capability flags - is the guard on, is a model
+        available, which levels call a human - and never how many rules stand
+        between them and an answer.
+        """
+        employee_pipeline = client.get(
+            "/api/v1/chat/capabilities", headers=employee_headers
+        ).json()["pipeline"]
+        security_pipeline = client.get(
+            "/api/v1/chat/capabilities", headers=security_headers
+        ).json()["pipeline"]
+
+        assert "blocking_rules" not in repr(employee_pipeline)
+        assert "rule_count" not in repr(employee_pipeline)
+        assert "threshold" not in repr(employee_pipeline)
+
+        # The flags a user actually needs are still there.
+        assert employee_pipeline["guard"]["enabled"] is True
+        assert set(employee_pipeline["risk"]["escalation_levels"]) == {"high", "critical"}
+
+        # And the team that operates the system can still see the numbers.
+        assert security_pipeline["guard"]["blocking_rules"] > 0
+        assert security_pipeline["intent"]["rule_count"] > 0
+        assert security_pipeline["risk"]["rule_count"] > 0
+
+    def test_operational_detail_requires_authentication(
+        self, client: TestClient, employee_headers
+    ) -> None:
+        # This is where the AI stack fingerprint lives now that /meta is anonymous.
+        assert client.get("/api/v1/chat/capabilities").status_code == 401
+        body = client.get("/api/v1/chat/capabilities", headers=employee_headers).json()
+        assert body["retrieval"]["top_k"] >= 1
+        assert body["retrieval"]["vector_store"]
+
 
 class TestRateLimiting:
     def test_messages_are_throttled_per_user(
@@ -394,6 +432,42 @@ class TestRateLimiting:
             f"/api/v1/chat/conversations/{conversation_id}", headers=employee_headers
         ).json()
         assert len(detail["messages"]) == 2, "a throttled request must not be stored"
+
+    def test_the_search_endpoint_is_throttled_too(
+        self, client: TestClient, employee_headers, app
+    ) -> None:
+        """`/knowledge/search` is the same expensive primitive as a chat turn.
+
+        It embeds the query and runs a vector search. It used to be unmetered while
+        the chat endpoint beside it was limited - 60 searches in under a second
+        returned 60 x 200 with no 429 - so the limit covered one of two equivalent
+        routes, and with a hosted embedding provider that is an unmetered path to a
+        bill.
+        """
+        app.state.knowledge_search_limiter = SlidingWindowLimiter(limit=2)
+        payload = {"query": "password policy"}
+        assert client.post("/api/v1/knowledge/search", json=payload, headers=employee_headers).status_code == 200
+        assert client.post("/api/v1/knowledge/search", json=payload, headers=employee_headers).status_code == 200
+        throttled = client.post("/api/v1/knowledge/search", json=payload, headers=employee_headers)
+        assert throttled.status_code == 429
+        assert throttled.json()["error"]["code"] == "rate_limited"
+
+    def test_the_search_budget_is_separate_from_the_chat_budget(
+        self, client: TestClient, employee_headers, app
+    ) -> None:
+        # A search must not silently spend the chat allowance: the two are keyed
+        # separately, so exhausting one leaves the other usable.
+        app.state.knowledge_search_limiter = SlidingWindowLimiter(limit=1)
+        app.state.chat_limiter = SlidingWindowLimiter(limit=1)
+        client.post(
+            "/api/v1/knowledge/search", json={"query": "password policy"}, headers=employee_headers
+        )
+        throttled = client.post(
+            "/api/v1/knowledge/search", json={"query": "password policy"}, headers=employee_headers
+        )
+        assert throttled.status_code == 429
+        conversation_id = new_conversation(client, employee_headers)
+        assert ask(client, employee_headers, conversation_id, "password").status_code == 200
 
 
 class TestRateLimiterUnit:

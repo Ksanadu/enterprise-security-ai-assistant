@@ -27,14 +27,6 @@ const meta: MetaResponse = {
   version: '0.1.0',
   environment: 'test',
   features: { demo_login: true, demo_users_seeded: true },
-  ai: {
-    llm_provider: 'mock',
-    llm_model: 'offline-extractive-v1',
-    llm_configured: true,
-    embedding_provider: 'tfidf',
-    vector_store: 'memory',
-    retrieval_top_k: 5,
-  },
   roles: ['employee', 'it', 'security'],
 }
 
@@ -377,7 +369,7 @@ describe('chat workspace', () => {
           {
             error: {
               code: 'rate_limited',
-              message: 'Too many requests. Please wait before sending another message.',
+              message: 'Too many requests. Please wait before trying again.',
             },
           },
           429,

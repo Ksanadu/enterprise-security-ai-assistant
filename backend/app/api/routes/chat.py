@@ -12,8 +12,8 @@ from typing import Any
 
 from fastapi import APIRouter, Request, Response, status
 
-from app.api.deps import AppSettings, CurrentUser, DbSession, client_ip
-from app.core.enums import AuditOutcome
+from app.api.deps import AppSettings, CurrentUser, DbSession, client_ip, per_user_limiter
+from app.core.enums import AuditOutcome, Role
 from app.db.models import Conversation, Message
 from app.schemas.chat import (
     ConversationDetail,
@@ -51,11 +51,9 @@ def get_chat_service(request: Request) -> ChatService:
 
 def message_limiter(request: Request, settings: AppSettings) -> SlidingWindowLimiter:
     """Per-process limiter for chat messages, created once per application."""
-    limiter = getattr(request.app.state, "chat_limiter", None)
-    if limiter is None:
-        limiter = SlidingWindowLimiter(limit=settings.chat_rate_limit_per_minute)
-        request.app.state.chat_limiter = limiter
-    return limiter
+    return per_user_limiter(
+        request, name="chat_limiter", limit=settings.chat_rate_limit_per_minute
+    )
 
 
 def _iso(value: Any) -> str | None:
@@ -256,20 +254,57 @@ def post_message(
     "/capabilities",
     summary="What the assistant can currently do, for the calling role",
 )
-def capabilities(request: Request, user: CurrentUser) -> dict[str, Any]:
-    """Describes the assistant to the UI without exposing any configuration secret."""
+def capabilities(request: Request, user: CurrentUser, settings: AppSettings) -> dict[str, Any]:
+    """Describes the assistant to the UI without exposing any configuration secret.
+
+    Authenticated callers get the operational picture the footer and the sidebar
+    need - which generator is answering, and which index is being searched. The
+    *counts* inside the pipeline description (guard rules, intent rules, risk rules,
+    the confidence threshold) are visible only to the security role: they describe
+    the size of the pattern-matching gate and where its threshold sits, which is a
+    map for anyone trying to get past it, and no other role needs them to use the
+    product.
+    """
     chat = get_chat_service(request)
     knowledge = get_knowledge(request)
     from app.security.rbac import describe_role
 
     scope = describe_role(user.role, knowledge.index.documents)
+    detailed = user.role is Role.SECURITY
     return {
         "role": user.role.value,
         "role_label": user.role.label,
         "scope_description": scope["description"],
         "document_count": scope["document_count"],
         "provider": chat.describe_provider(),
-        "pipeline": chat.describe_pipeline(),
+        "pipeline": describe_pipeline_for(chat.describe_pipeline(), detailed=detailed),
         "knowledge_ready": knowledge.is_ready(),
         "categories": knowledge.categories(user.role),
+        "retrieval": {
+            "vector_store": settings.vector_store,
+            "top_k": settings.retrieval_top_k,
+        },
+    }
+
+
+def describe_pipeline_for(pipeline: dict[str, Any], *, detailed: bool) -> dict[str, Any]:
+    """The pipeline description, with the rule counts removed for non-security roles.
+
+    Kept as a function rather than a comprehension so the reduction is explicit and
+    testable: everything an ordinary role receives is a capability flag, never a
+    count.
+    """
+    if detailed:
+        return pipeline
+
+    guard = pipeline.get("guard", {})
+    intent = pipeline.get("intent", {})
+    risk = pipeline.get("risk", {})
+    return {
+        "guard": {"enabled": guard.get("enabled", False)},
+        "intent": {"model_available": intent.get("model_available", False)},
+        # Which levels a human is called for is published policy (KB-009), so it
+        # stays: a user needs it to understand why they were escalated.
+        "risk": {"escalation_levels": risk.get("escalation_levels", [])},
+        "workflow": pipeline.get("workflow", {}),
     }

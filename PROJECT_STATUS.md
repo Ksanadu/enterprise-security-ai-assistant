@@ -75,10 +75,31 @@ independent defect register is `Reviewer Report.md`.
       table agree for the six published defaults — it caught a second live drift
       (`RETRIEVAL_TOP_K` documented as 5) on its first run.
 
+**Round 3 — what an anonymous caller may learn, and one limiter for one primitive — DONE**
+
+- [x] P1-03 (Reviewer P1-3) — `GET /api/v1/meta` needed no token and returned the AI stack
+      fingerprint (provider, model, embedding backend, vector store, retrieval `top_k`) plus
+      demo-login/seed state. An anonymous caller now gets name, version, environment, feature
+      flags and the role list; nothing else. Verified live: the response contains no AI key at all.
+- [x] P1-03 (second half) — operational detail moved to the *authenticated*
+      `GET /api/v1/chat/capabilities` (generator, vector store, `top_k`), and the rule counts
+      inside it are now visible only to the security role. An employee gets capability flags
+      (guard on/off, model available, which levels escalate); the security team still gets the
+      numbers it operates with. `/chat/capabilities` without a token is 401 (it always was).
+- [x] P1-04 (Reviewer P1-4) — `/knowledge/search` embeds a query and runs a vector search, the
+      same expensive primitive as a chat turn, and had no limiter at all. Verified live: 30 rapid
+      searches returned 20 × 200 then 429 from request 21, the same budget as chat, on a separate
+      key so a search cannot silently spend the chat allowance.
+- [x] The demo now respects the search limiter the way it already respected the chat one (a second
+      run inside the same minute used to fail), and SCENARIO 0 demonstrates the new boundary
+      instead of printing the stack: "the AI stack is not disclosed without a token", "rule counts
+      are not disclosed to an ordinary role", "the security role still sees the counts it operates
+      with". The demo is now **71 checks**, and the count is asserted against the documentation.
+- [x] Frontend follows: `MetaResponse` loses `ai`, the footer prints environment and version
+      rather than the provider and index, and `ChatCapabilities` carries the new `retrieval` block.
+
 **Scheduled** (severity order; one round per commit):
 
-- [ ] P1-03 (Reviewer P1-3) — anonymous `/api/v1/meta` discloses the AI stack. Round 3
-- [ ] P1-04 (Reviewer P1-4) — `/knowledge/search` embeds unthrottled. Round 3
 - [ ] P1-05 (Reviewer P1-5) — ticket `statistics` capped at 200 rows and not queue-scoped. Round 4
 - [ ] P1-06 (Reviewer P1-6) — self-raised tickets ignore `category`, always IT/low, read-only.
       Round 4
@@ -107,16 +128,23 @@ independent defect register is `Reviewer Report.md`.
 | Gate | Result |
 | --- | --- |
 | `scripts/check.ps1` (ruff, mypy, pytest, tsc, eslint, vitest, secret scan) | **exit 0** |
-| Backend `pytest -q` | **1463 passed, 1 skipped** (started at 1415/1) |
+| Backend `pytest -q` | **1468 passed, 1 skipped** (started at 1415/1) |
 | Backend coverage `--cov=app` | **95%** (4128 statements, 214 missed); `app/ai/llm.py` **84% → 98%** |
 | Frontend `npm test` | **59 passed** (2 files) |
 | `security`-marked tests | 1067 → re-measured in Round 5 |
-| `backend/scripts/demo.py` | **67 / 67 checks passed** |
+| `backend/scripts/demo.py` | **71 / 71 checks passed** (was 67; SCENARIO 0 now demonstrates the disclosure boundary and the search limiter) |
+| Disclosure boundary (live) | anonymous `/meta` carries no AI-stack key; anonymous `/chat/capabilities` is 401; rule counts absent for employee, present for security |
+| `/knowledge/search` throttle (live) | 30 rapid searches → 20 × 200, then 429 from request 21 (same budget as chat, separate key) |
 | Evaluation set (40 questions, live API) | intent 40/40, risk 40/40, escalation 40/40, ticket 40/40, blocked 40/40, **expected document 28/28** (was 25/28 before the config realignment) |
 | Escalation corpus | **52 / 52** S1/S2 phrasings escalate; 20 legitimate questions do not |
 | Injection corpus | **31 / 31** blocked; 12 document requests + 3 reported requests not blocked |
 | Config drift guard | code default == `.env.example` == README settings table, for the six published defaults |
 | `scripts/check-no-secrets.ps1` | OK, 175 files, all required assets present |
+
+**Repository conventions learned the hard way** (this round): never round-trip `README.md` or
+`docs/DEMO.md` through PowerShell `Get-Content`/`Set-Content` — on Windows PowerShell 5.1 it reads
+UTF-8 as ANSI and writes a BOM, which mangles every non-ASCII character (the handoff warns about
+this in §11.6; it cost one `git checkout --` to undo). Use the editor or an explicit UTF-8 API.
 
 The single skip is `tests/test_deployment_assets.py:436` — the Docker CLI is absent on this
 machine, so acceptance criterion §9.10 (`docker compose up`) remains **unproven**, exactly as the

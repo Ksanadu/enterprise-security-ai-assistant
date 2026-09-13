@@ -48,29 +48,22 @@ def health(request: Request, session: DbSession, settings: AppSettings) -> Healt
     )
 
 
-@router.get("/meta", response_model=MetaResponse, summary="Public configuration summary")
+@router.get("/meta", response_model=MetaResponse, summary="Public application metadata")
 def meta(settings: AppSettings) -> MetaResponse:
-    """Expose non-sensitive configuration so the UI can adapt.
+    """The minimum an unauthenticated client needs to render the app.
 
-    No secret, key or credential is ever included - see
-    :meth:`app.core.config.Settings.public_summary`.
+    Name, version, environment and the feature flags the sign-in screen depends on.
+    Nothing about the AI stack: an anonymous caller used to learn the provider, the
+    model, the embedding backend, the vector store, the retrieval `top_k` and that
+    demo users were seeded, which is a target list rather than a feature list.
     """
-    summary = settings.public_summary()
     return MetaResponse(
         app_name=settings.app_name,
         version=__version__,
         environment=settings.app_env,
         features={
-            "demo_login": bool(summary["demo_login_enabled"]),
-            "demo_users_seeded": bool(summary["demo_users_seeded"]),
-        },
-        ai={
-            "llm_provider": summary["llm_provider"],
-            "llm_model": summary["llm_model"],
-            "llm_configured": summary["llm_configured"],
-            "embedding_provider": summary["embedding_provider"],
-            "vector_store": summary["vector_store"],
-            "retrieval_top_k": summary["retrieval_top_k"],
+            "demo_login": settings.demo_login_enabled,
+            "demo_users_seeded": settings.seed_demo_users,
         },
         roles=[role.value for role in Role],
     )
