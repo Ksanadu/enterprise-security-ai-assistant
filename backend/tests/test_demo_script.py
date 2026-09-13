@@ -26,6 +26,7 @@ from app.main import create_app
 from tests.conftest import DEMO_PASSWORD
 
 BACKEND_DIR = Path(__file__).resolve().parents[1]
+DEMO_SCRIPT = BACKEND_DIR / "scripts" / "demo.py"
 if str(BACKEND_DIR / "scripts") not in sys.path:
     sys.path.insert(0, str(BACKEND_DIR / "scripts"))
 
@@ -179,3 +180,24 @@ class TestTheCommandLine:
         for flag in ("--base-url", "--password", "--quiet", "--timeout"):
             assert flag in source, flag
         assert "http://127.0.0.1:8000" in source
+
+    def test_the_demo_waits_out_a_rate_limit_instead_of_failing(self) -> None:
+        """A demonstration that cannot be repeated is a poor demonstration.
+
+        The demo posts around a dozen questions and the default limit is 20 per
+        minute per user, so a second run used to fail outright. The limit is a
+        security control, so the fix is to respect it and wait for the window the
+        server reports - never to raise or bypass it.
+        """
+        source = DEMO_SCRIPT.read_text(encoding="utf-8")
+        assert "429" in source
+        assert "time.sleep" in source
+        assert "retry_after_seconds" in source
+        # It must not disable or raise the limit to make itself pass.
+        assert "CHAT_RATE_LIMIT_PER_MINUTE=" not in source
+        assert "monkeypatch" not in source
+
+    def test_the_wait_is_bounded(self) -> None:
+        source = DEMO_SCRIPT.read_text(encoding="utf-8")
+        assert "MAX_RATE_LIMIT_WAITS" in source
+        assert "min(seconds" in source, "an unbounded wait could hang a CI job"

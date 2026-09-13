@@ -296,9 +296,9 @@ field nobody reads is not an answer.
   dashboard, triage it, and check the audit trail - all through HTTP.
 * **Cross-role consistency**: the same question asked by all three roles must produce an
   identical classification and identical escalation, while retrieval differs and stays in scope.
-* **1059 security-marked tests** covering RBAC, injection, leakage, session handling, ticket
+* **1067 security-marked tests** covering RBAC, injection, leakage, session handling, ticket
   scoping, redaction and the deployment assets, runnable as one suite with `pytest -m security`.
-* 1405 backend tests, **94% statement coverage**; `ruff`, `mypy`, `tsc` and `eslint` clean.
+* 1415 backend tests, **94% statement coverage**; `ruff`, `mypy`, `tsc` and `eslint` clean.
 
 The set immediately earned its keep. Writing it exposed a set of real defects:
 
@@ -457,7 +457,7 @@ stale cached index). A mismatch is logged as a security event and the chunk is d
 │   ├── scripts/
 │   │   ├── demo.py               # the executable demonstration (67 checks)
 │   │   └── update_evaluation_expectations.py
-│   ├── tests/                    # 1405 tests
+│   ├── tests/                    # 1415 tests
 │   └── requirements*.txt
 ├── frontend/
 │   ├── Dockerfile                # Vite build stage → nginx runtime stage
@@ -656,6 +656,38 @@ insecurely. Setting `APP_ENV=production` in `.env` turns on these refusals:
 | `KB_STRICT_VALIDATION=true` | A malformed document is a startup failure, not a silently skipped one. |
 | `TRUSTED_PROXY_COUNT=1` | Set by `docker-compose.yml`. It must equal the real number of proxies, or per-address lockout and audit addresses degrade to the proxy's address. |
 
+### Verifying the image without a container runtime
+
+`scripts\verify-container-image.ps1` reproduces the backend image locally, because
+static analysis cannot tell you whether `requirements.txt` is complete or whether the
+files the Dockerfile copies are enough for the app to start:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts\verify-container-image.ps1
+```
+
+It builds a **fresh virtualenv from `requirements.txt` alone** (so a dependency that
+exists only in `requirements-dev.txt` cannot hide a missing entry), lays out a
+directory exactly as the runtime stage does - only `app/` and `knowledge_base/`, plus
+an empty `data/` mount point - then starts uvicorn with the container's own
+environment and its exact CMD, signs in, asks a question, and checks that the
+database and vector index were written to the mount point rather than into the image.
+
+The last run:
+
+```
+ok   requirements.txt installs cleanly on its own
+ok   only app/ and knowledge_base/ are present, plus the empty data/ mount point
+ok   uvicorn started from the image layout and reported healthy
+ok   answered: intent=phishing risk=high ticket=SEC-2026-0003
+ok   data\app.db written under the mount point
+ok   data\vector_store\fingerprint.txt written under the mount point
+IMAGE CHECK PASSED
+```
+
+That is not `docker compose up`, and it is not claimed to be. It does establish what
+the file-level checks cannot: the image's contents and its entrypoint work.
+
 ### What was and was not verified
 
 Docker is not installed in the environment this project was developed in, so **`docker compose up`
@@ -762,12 +794,12 @@ The suite has three layers:
 
 | Layer | What it covers | How to run |
 | ----- | -------------- | ---------- |
-| Unit and integration (1405 tests) | Every module: config guards, ORM, RAG, classifiers, services, API, deployment assets | `pytest -q` |
-| Security (1059 tests) | RBAC, injection, leakage, sessions, ticket scoping, redaction, deployment hardening | `pytest -m security` |
+| Unit and integration (1415 tests) | Every module: config guards, ORM, RAG, classifiers, services, API, deployment assets | `pytest -q` |
+| Security (1067 tests) | RBAC, injection, leakage, sessions, ticket scoping, redaction, deployment hardening | `pytest -m security` |
 | Evaluation (61 tests) | The 40-question set and the end-to-end demo walkthrough | `pytest -m evaluation` |
 
 ```powershell
-# backend: 1405 tests, 94% statement coverage
+# backend: 1415 tests, 94% statement coverage
 cd backend
 .\.venv\Scripts\python.exe -m pytest -q
 .\.venv\Scripts\python.exe -m pytest -m security -q          # security subset

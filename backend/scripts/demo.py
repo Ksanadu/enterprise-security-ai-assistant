@@ -24,6 +24,7 @@ from __future__ import annotations
 import argparse
 import os
 import sys
+import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any
@@ -41,6 +42,20 @@ DEMO_ACCOUNTS: dict[str, str] = {
 
 #: The documented demo password. Not a secret: it is seeded demo data, and
 #: seeding is refused outright when APP_ENV=production.
+#: How many times the demo will wait out a 429 before giving up. Two is enough for
+#: a repeat run; more would just make a genuine misconfiguration slow to surface.
+MAX_RATE_LIMIT_WAITS = 3
+
+
+def _retry_after_seconds(response: httpx.Response) -> float:
+    """How long the server asked us to wait, clamped to something sane."""
+    try:
+        details = response.json().get("error", {}).get("details", {})
+        seconds = float(details.get("retry_after_seconds", 60))
+    except Exception:
+        seconds = 60.0
+    return max(1.0, min(seconds, 120.0))
+
 DEFAULT_PASSWORD = "Demo@12345"  # noqa: S105
 ROLE_LABELS = {
     "employee": "Employee",
@@ -177,16 +192,40 @@ class Demo:
         return int(response.json()["id"])
 
     def ask(self, role: str, conversation_id: int, question: str) -> dict[str, Any]:
-        response = self._client.post(
-            f"/api/v1/chat/conversations/{conversation_id}/messages",
-            headers=self._headers(role),
-            json={"content": question},
-        )
-        if response.status_code == 429:
-            raise SystemExit(
-                "rate limited by the chat endpoint; wait a minute or raise "
-                "CHAT_RATE_LIMIT_PER_MINUTE before running the demo"
+        """Ask one question, waiting out the rate limit rather than failing.
+
+        The demo posts around a dozen questions and the default limit is 20 per
+        minute per user, so running it twice in a row used to fail on the second
+        run. A demonstration that cannot be repeated is a poor demonstration - but
+        the limit is a security control, so the answer is to *respect* it and wait
+        for the window the server reports, not to raise or bypass it.
+        """
+        attempts = 0
+        while True:
+            response = self._client.post(
+                f"/api/v1/chat/conversations/{conversation_id}/messages",
+                headers=self._headers(role),
+                json={"content": question},
             )
+            if response.status_code != 429:
+                break
+
+            attempts += 1
+            if attempts > MAX_RATE_LIMIT_WAITS:
+                raise SystemExit(
+                    f"still rate limited after {MAX_RATE_LIMIT_WAITS} waits; raise "
+                    "CHAT_RATE_LIMIT_PER_MINUTE or wait a few minutes before running "
+                    "the demo"
+                )
+
+            wait = _retry_after_seconds(response)
+            self.say(
+                f"      (rate limited by the chat endpoint; waiting {wait:.0f}s for the "
+                "window to reopen - the limit is a security control, not an obstacle "
+                "to route around)"
+            )
+            time.sleep(wait)
+
         response.raise_for_status()
         return response.json()
 

@@ -742,7 +742,6 @@ class TestDockerignore:
 
 class TestLocalRunScript:
     """The repository must be runnable without a container runtime."""
-
     @pytest.fixture(scope="class")
     def script(self) -> str:
         path = PROJECT_ROOT / "scripts" / "run-local.ps1"
@@ -807,3 +806,69 @@ class TestProductionBundleCanBeVerifiedWithoutContainers:
         nginx = NGINX_CONF.read_text(encoding="utf-8")
         assert "location /api/" in nginx
         assert "'/api'" in (FRONTEND_DIR / "vite.config.ts").read_text(encoding="utf-8")
+
+
+class TestTheImageCanBeVerifiedWithoutDocker:
+    """Static checks cannot tell you whether `requirements.txt` is complete.
+
+    `scripts/verify-container-image.ps1` reproduces the runtime stage locally: a
+    fresh virtualenv from `requirements.txt` *alone*, the same copy set the
+    Dockerfile uses, the container's own environment and its exact CMD. It is not
+    `docker compose up`, but it does prove the image's contents and entrypoint
+    work - which is precisely what analysis of the files cannot establish.
+    """
+
+    @pytest.fixture(scope="class")
+    def script(self) -> str:
+        path = PROJECT_ROOT / "scripts" / "verify-container-image.ps1"
+        assert path.is_file(), "the image verification script is missing"
+        return path.read_text(encoding="utf-8")
+
+    def test_it_installs_from_requirements_alone(self, script: str) -> None:
+        # The point of the check: a dependency that only exists in
+        # requirements-dev.txt must not be available to hide a missing entry.
+        # The script *mentions* requirements-dev.txt when explaining why, so this
+        # asserts on the install command rather than on the file's vocabulary.
+        installs = [line for line in script.splitlines() if "pip install" in line]
+        assert installs, "the script never installs anything"
+        for line in installs:
+            assert "requirements.txt" in line, line
+            assert "requirements-dev.txt" not in line, line
+
+    def test_it_reproduces_the_dockerfile_copy_set(self, script: str) -> None:
+        dockerfile = BACKEND_DOCKERFILE.read_text(encoding="utf-8")
+        for source in ("app", "knowledge_base"):
+            assert f"COPY --chown=appuser:appuser {source}" in dockerfile
+            assert source in script, f"the check does not lay out {source}/"
+
+    def test_it_uses_the_containers_own_command(self, script: str) -> None:
+        dockerfile = BACKEND_DOCKERFILE.read_text(encoding="utf-8")
+        assert "uvicorn" in dockerfile
+        assert "uvicorn" in script
+        assert "--no-server-header" in script, "the CMD's flag is not reproduced"
+
+    def test_it_uses_the_container_side_paths(self, script: str) -> None:
+        # The paths docker-compose.yml sets are the ones that have to resolve.
+        compose = COMPOSE_FILE.read_text(encoding="utf-8")
+        assert "DATABASE_URL" in compose
+        for variable in ("DATABASE_URL", "VECTOR_STORE_PATH", "KB_DIR"):
+            assert variable in script, variable
+
+    def test_it_checks_state_lands_on_the_mount_point(self, script: str) -> None:
+        # A container that writes its database into the image loses it on restart,
+        # and that is invisible to a static check.
+        assert "app.db" in script
+        assert "vector_store" in script
+
+    def test_it_fails_loudly(self, script: str) -> None:
+        assert "exit 1" in script and "exit 0" in script
+
+    def test_it_resolves_a_real_interpreter(self, script: str) -> None:
+        # `python` on PATH is often the Microsoft Store stub, which is not an
+        # interpreter at all - the first version of this script died on it.
+        assert "WindowsApps" in script, "the Store alias is not filtered out"
+        assert "Resolve-Python" in script
+
+    def test_it_is_documented(self) -> None:
+        readme = (PROJECT_ROOT / "README.md").read_text(encoding="utf-8")
+        assert "verify-container-image.ps1" in readme
