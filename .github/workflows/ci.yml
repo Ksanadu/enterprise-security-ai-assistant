@@ -44,7 +44,7 @@ jobs:
       - name: Create the backend virtualenv
         working-directory: backend
         run: |
-          py -3.12 -m venv .venv
+          python -m venv .venv
           .\.venv\Scripts\python.exe -m pip install --upgrade pip
           .\.venv\Scripts\python.exe -m pip install -r requirements.txt
           .\.venv\Scripts\python.exe -m pip install -r requirements-dev.txt
