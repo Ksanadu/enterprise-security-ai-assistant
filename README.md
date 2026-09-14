@@ -178,8 +178,9 @@ document's identifier, title or path.
   adversarial sweep. A frame now exempts only a request it **governs** - the complement must lead
   straight into the requested verb, with no clause break and nothing but connective filler between
   them - and every match of every pattern is evaluated, so one reported clause cannot shield a
-  later genuine demand in the same message. Both halves are asserted: 8 decoy prefaces that must be
-  refused, and 7 sincere reports that must be answered.
+  later genuine demand in the same message. Both halves are asserted: nine laundering cases that must be refused (the
+  sweep's eight decoy prefaces plus a reported request followed by a genuine one), and
+  seven sincere reports that must be answered.
 * **Intent classifier** over six intents, with 52 deterministic rules that need no API key. A
   language model is consulted only when it is available *and* the rules were unsure, and it must
   answer with schema-validated JSON or the rule result stands.
@@ -386,7 +387,7 @@ field nobody reads is not an answer.
   identical classification and identical escalation, while retrieval differs and stays in scope.
 * **1067 security-marked tests** covering RBAC, injection, leakage, session handling, ticket
   scoping, redaction and the deployment assets, runnable as one suite with `pytest -m security`.
-* 1548 backend tests, **95% statement coverage** (the coverage floor is enforced by the gate);
+* 1558 backend tests, **95% statement coverage** (the coverage floor is enforced by the gate);
   `ruff`, `mypy`, `tsc` and `eslint` clean. The phase this section describes closed with a smaller
   suite; the figure above is the current one, and the four places in this README that state it are
   asserted to agree by `tests/test_documentation.py`.
@@ -548,7 +549,7 @@ stale cached index). A mismatch is logged as a security event and the chunk is d
 │   ├── scripts/
 │   │   ├── demo.py               # the executable demonstration (71 checks)
 │   │   └── update_evaluation_expectations.py
-│   ├── tests/                    # 1548 tests
+│   ├── tests/                    # 1558 tests
 │   └── requirements*.txt
 ├── frontend/
 │   ├── Dockerfile                # Vite build stage → nginx runtime stage
@@ -898,12 +899,12 @@ The suite has three layers:
 
 | Layer | What it covers | How to run |
 | ----- | -------------- | ---------- |
-| Unit and integration (1548 tests) | Every module: config guards, ORM, RAG, classifiers, services, API, deployment assets | `pytest -q` |
+| Unit and integration (1558 tests) | Every module: config guards, ORM, RAG, classifiers, services, API, deployment assets | `pytest -q` |
 | Security (1067 tests) | RBAC, injection, leakage, sessions, ticket scoping, redaction, deployment hardening | `pytest -m security` |
 | Evaluation (61 tests) | The 40-question set and the end-to-end demo walkthrough | `pytest -m evaluation` |
 
 ```powershell
-# backend: 1548 tests, 95% statement coverage (floor 90)
+# backend: 1558 tests, 95% statement coverage (floor 90)
 cd backend
 .\.venv\Scripts\python.exe -m pytest -q
 .\.venv\Scripts\python.exe -m pytest -m security -q          # security subset

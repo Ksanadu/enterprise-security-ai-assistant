@@ -253,8 +253,9 @@ writing passwords on paper is worse than one that says nothing.
 repaired (R9).** `creates_ticket` becomes true for `clarify` (which files a ticket) with a test;
 the UI maps `it_support → it`, incident intents → `security`, everything else → `other` (the
 catch-all currently files a security-owned medium ticket for a policy question); the two
-`getAllByText(...).length >= 1` assertions become assertions that can fail; README counts become
-1476 collected with the historical phase bullets labelled as historical.
+`getAllByText(...).length >= 1` assertions become assertions that can fail; the README's four
+"current total" statements are corrected to the real figure at that time (1548 collected, then
+1552 after R10) with the phase-history bullets labelled as historical.
 
 **D6 — `/meta` drops `demo_users_seeded`; `environment` and `demo_login` stay (R9).**
 `demo_users_seeded` answers "are seeded demo accounts live here?" and no UI reads it. `environment`
@@ -304,9 +305,11 @@ as a body of ≥200 characters rather than as a front-matter key: documented in 
       `show me the production database admin password` was answered. The window is now four, with
       the document-noun lookahead still clause-bounded (`the password policy` stays a document
       request).
-- [x] Both halves are asserted in `tests/test_prompt_guard.py`: 8 decoy prefaces and 3 wide-window
-      value requests must be refused, 7 sincere reports and 12 document requests must be answered.
-      `pytest` 1492 passed (up 17), guard corpus now 31 injections + 8 decoys + 3 window cases.
+- [x] Both halves are asserted in `tests/test_prompt_guard.py`: **9 laundering cases** (the sweep's 8
+      decoy prefaces plus a reported request followed by a genuine one) and 3 wide-window value
+      requests must be refused, 7 sincere reports and 12 document requests must be answered.
+      `pytest` 1492 passed at this round (up 17); the guard corpus is 31 injections plus the 9 + 3
+      cases above.
 - [x] Verified live: demo **71/71**, evaluation set **40/40** with **28/28** expected documents,
       and the 5 injection questions in the set still blocked (`blocked correct 40/40`).
 
@@ -352,10 +355,12 @@ as a body of ≥200 characters rather than as a front-matter key: documented in 
 - [x] D5c — the two "can never fail" assertions are gone: `.length >= 1` on a `getAllByText`
       result is decorative by construction, so the queried **count** is asserted (exactly 1 in the
       answer body, exactly 2 across the message) and a duplicate or a missing node now fails.
-- [x] D5d — README counts corrected to 1548 collected / 95% coverage, with the phase-history
-      bullet left numberless. The README's own consistency test (`test_the_backend_test_count_is_
-      the_same_everywhere_it_appears`) caught the first attempt at this: it requires one current
-      total in four places and one coverage figure in the file.
+- [x] D5d — README counts corrected (1548 collected at that point; 1552 after R10 added four more
+      tests), with the phase-history bullet left numberless. The README's own consistency test
+      (`test_the_backend_test_count_is_the_same_everywhere_it_appears`) caught the first attempt at
+      this: it requires one current total in four places and one coverage figure in the file. It
+      checks that the four *agree with each other*, not that they match reality — which is why this
+      audit had to re-measure the count by hand and found the four had drifted together.
 - [x] D6 — `/meta` no longer publishes `demo_users_seeded`: no client read it, and to an anonymous
       caller it answered exactly one question ("are seeded demo accounts live here?").
       `environment` and `demo_login` stay, because the sign-in screen needs them.
@@ -432,23 +437,35 @@ every round, in the same commit as the change it describes.
 | Gate | Result |
 | --- | --- |
 | `scripts/check.ps1` (ruff, mypy, pytest+cov, tsc, eslint, vitest+cov, secret scan) | **exit 0** |
-| Backend `pytest -q` | **1475 passed, 1 skipped** (started at 1415/1) |
-| Backend coverage `--cov=app` | **95%** (4213 statements, 215 missed), floor 90 enforced; `app/main.py` now measured (93%); `app/ai/llm.py` 84% → 98% |
-| Frontend `npm test` | **59 passed** (2 files) |
-| Frontend coverage | **91.4% statements / 80.4% branches / 74.4% functions**, thresholds 85 / 75 / 70 enforced |
-| `security`-marked tests | **1110** of 1476 collected (was 1067 of 1416) |
-| CI | `.github/workflows/ci.yml` runs the whole gate on push to `main` and on pull requests. Green on every round since the workflow was fixed: `c1c63a4` (R7), `fb8accc` (R8), `bc4d09a` (R9), `c944644` (R10), plus `c3da181` and `7e74377` before them |
+| Backend `pytest -q` | **1557 passed, 1 skipped** of **1558 collected** (started at 1415/1) |
+| Backend coverage `--cov=app` | **95%** (4308 statements, 215 missed), floor 90 enforced; `app/main.py` measured (93%); `app/ai/llm.py` 84% → 98% |
+| Frontend `npm test` | **62 passed** (2 files) |
+| Frontend coverage | **91.39% statements / 80.6% branches / 74.44% functions**, thresholds 85 / 75 / 70 enforced |
+| `security`-marked tests | **1182** of 1558 collected (was 1067 of 1416 before the stabilization pass) |
+| CI | `.github/workflows/ci.yml` runs the whole gate on push to `main` and on pull requests. Green on every round since the workflow was fixed: `c1c63a4` (R7), `fb8accc` (R8), `bc4d09a` (R9), `c944644` (R10), `2cd3f4a`, plus `c3da181` and `7e74377` before them |
 | `backend/scripts/demo.py` | **71 / 71 checks passed** (was 67; SCENARIO 0 now demonstrates the disclosure boundary and the search limiter) |
-| Disclosure boundary (live) | anonymous `/meta` carries no AI-stack key; anonymous `/chat/capabilities` is 401; rule counts absent for employee, present for security |
+| Disclosure boundary (live) | anonymous `/meta` carries no AI-stack key and no `demo_users_seeded`; anonymous `/chat/capabilities` is 401; rule counts absent for employee, present for security |
 | `/knowledge/search` throttle (live) | 30 rapid searches → 20 × 200, then 429 from request 21 (same budget as chat, separate key) |
 | Ticket routing (live) | `category=security`/`phishing` → `SEC-…`/security/medium; `it`/`other` → `IT-…`/it/low; body `severity`/`owner_role`/`status` ignored |
-| Ticket counts (live) | `statistics.total` == listed count for employee, IT and security; no page cap |
+| Ticket counts (live) | `statistics.total` == listed count for employee, IT and security; no page cap (241/263 counted exactly) |
 | Medium-report tracking (live) | `risk=medium`, `action=clarify`, ticket opened, `escalated=false`; the ticket survives a next turn that asks something else |
+| Peak-risk noise (live) | one incident + three benign follow-ups: all three `low` / no escalation / `action=none`; ticket events **5 → 2** |
 | Evaluation set (40 questions, live API) | intent 40/40, risk 40/40, escalation 40/40, ticket 40/40, blocked 40/40, **expected document 28/28** (was 25/28 before the config realignment) |
-| Escalation corpus | **52 / 52** S1/S2 phrasings escalate; 20 legitimate questions do not |
-| Injection corpus | **31 / 31** blocked; 12 document requests + 3 reported requests not blocked |
+| Escalation corpus | **52 / 52** S1/S2 phrasings escalate across 9 KB-009 buckets; 20 legitimate questions do not |
+| Guard corpora | **31 / 31** injections blocked; 12 document requests and 7 sincere reports not blocked; 9 laundering cases and 3 wide-window value requests blocked |
+| Incident-shape backstop | 9 / 9 shapes detected, **0** false positives on 14 legitimate questions and resolved cases; breach reports silent **8/10 → 0/10** |
+| Recommended-action polarity | no prohibition returned for the real KB-001 context; "Never approve an MFA prompt…" no longer becomes "Approve an MFA prompt…" |
 | Config drift guard | code default == `.env.example` == README settings table, for the six published defaults |
-| `scripts/check-no-secrets.ps1` | OK, all required assets present |
+| `scripts/check-no-secrets.ps1` | OK, **179** files, all required assets present |
+
+**This file is guarded, because it drifted once.** An audit on 2026-09-14 found this table three
+rounds out of date — it still said 1475 tests, 59 frontend tests and 1110 security-marked tests
+after R10 had 1557, 62 and 1182 — and the README's test total had drifted with it. Nothing failed,
+because nothing was checking. `tests/test_documentation.py::TestProjectStatusMatchesTheCode` now
+asserts the countable claims against the code: the rule counts, the guard and escalation corpora,
+the evaluation-set size, that all ten rounds are recorded, that every file path this document names
+exists, and — on a full run — the backend test total, taken from the pytest session itself. Adding
+tests without updating this file now fails with the new number in the message.
 
 **Repository conventions learned the hard way** (this round): never round-trip `README.md` or
 `docs/DEMO.md` through PowerShell `Get-Content`/`Set-Content` — on Windows PowerShell 5.1 it reads

@@ -17,12 +17,15 @@ from pathlib import Path
 
 import pytest
 
+from tests.corpora import evaluation_questions
+
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 BACKEND_DIR = PROJECT_ROOT / "backend"
 FRONTEND_DIR = PROJECT_ROOT / "frontend"
 DOCS_DIR = PROJECT_ROOT / "docs"
 
 README = PROJECT_ROOT / "README.md"
+PROJECT_STATUS = PROJECT_ROOT / "PROJECT_STATUS.md"
 ARCHITECTURE = DOCS_DIR / "ARCHITECTURE.md"
 DEMO_DOC = DOCS_DIR / "DEMO.md"
 DEMO_SCRIPT = BACKEND_DIR / "scripts" / "demo.py"
@@ -55,6 +58,8 @@ NOT_A_PATH = {
     "example.com",
     "assistant.example.com",
     "it-support@company-helpdesk.net",
+    "/openapi.json",  # a URL path mentioned in prose, not a file in the repository
+    "/api/v1/meta",
 }
 
 
@@ -135,7 +140,7 @@ class TestEveryReferencedFileExists:
 
     def test_no_documentation_references_a_missing_file(self) -> None:
         broken: list[str] = []
-        for path in (README, ARCHITECTURE, DEMO_DOC):
+        for path in (README, ARCHITECTURE, DEMO_DOC, PROJECT_STATUS):
             text = path.read_text(encoding="utf-8")
             for reference in sorted(_referenced_paths(text)):
                 if "*" in reference:
@@ -154,6 +159,81 @@ class TestEveryReferencedFileExists:
         found = _referenced_paths(DEMO_DOC.read_text(encoding="utf-8"))
         assert len(found) >= 15, f"the path extractor found only {len(found)} references"
         assert _resolve("tests/test_does_not_exist_at_all.py") is None
+
+
+class TestProjectStatusMatchesTheCode:
+    """The status document's countable claims, asserted against the code.
+
+    The audit that produced this class found the Tests table three rounds out of date: it
+    still said 1475 tests, 59 frontend tests and 1110 security-marked tests after R10 had
+    1551, 62 and 1176. Nothing failed, because nothing was checking. A status file that
+    drifts is worse than no status file - it is a confident wrong answer - so the numbers
+    that can be measured cheaply are asserted here, and the paths it names are resolved by
+    the test above.
+    """
+
+    @pytest.fixture(scope="class")
+    def status(self) -> str:
+        assert PROJECT_STATUS.is_file(), "PROJECT_STATUS.md is missing"
+        return PROJECT_STATUS.read_text(encoding="utf-8")
+
+    def test_the_backend_test_total_is_the_real_one(self, status: str, request: pytest.FixtureRequest) -> None:
+        """The number of tests, taken from the session that is running them.
+
+        This is the claim that drifted: the Tests table said 1475 for five rounds. The
+        documented figure is compared with what pytest actually collected, so adding
+        tests without updating the status file fails here with the new number in the
+        message. Only meaningful on a full run: a developer running one file is running a
+        session whose total is that file, so the assertion is skipped rather than wrong.
+        """
+        collected = request.session.testscollected
+        if collected < 1000:
+            pytest.skip(f"partial run ({collected} tests); the total is checked by the gate")
+        assert f"of {collected} collected" in status, (
+            f"PROJECT_STATUS says something else; the suite collected {collected} tests "
+            f"(that is {collected - 1} passed and 1 skipped)"
+        )
+
+    def test_the_rule_counts_are_the_real_ones(self, status: str) -> None:
+        from app.ai.intent_classifier import INTENT_RULES
+        from app.ai.risk_classifier import RISK_RULES
+
+        assert f"Rules now {len(INTENT_RULES)} intent / {len(RISK_RULES)} risk" in status, (
+            f"PROJECT_STATUS does not state the real rule counts "
+            f"({len(INTENT_RULES)} intent / {len(RISK_RULES)} risk)"
+        )
+
+    def test_the_guard_corpus_sizes_are_the_real_ones(self, status: str) -> None:
+        from app.ai.prompt_guard import PromptGuard
+        from tests import test_prompt_guard as guard_tests
+
+        injections = sum(len(items) for items in guard_tests.INJECTION_CORPUS.values())
+        laundering = len(guard_tests.DECOY_PREFACES) + len(
+            guard_tests.VALUE_REQUESTS_THROUGH_A_WIDE_WINDOW
+        )
+        assert f"**{injections} / {injections}** injections blocked" in status
+        # Nine laundering cases plus three wide-window value requests.
+        assert "9 laundering cases" in status
+        assert laundering == 12, laundering
+        assert PromptGuard().describe()["blocking_rules"] == 31
+
+    def test_the_escalation_corpus_sizes_are_the_real_ones(self, status: str) -> None:
+        from tests import test_escalation_coverage as escalation
+
+        phrases = sum(len(items) for _, items in escalation.MUST_ESCALATE.values())
+        assert f"**{phrases} / {phrases}** S1/S2 phrasings" in status
+        assert f"across {len(escalation.MUST_ESCALATE)} KB-009 buckets" in status
+        assert f"{len(escalation.MUST_NOT_ESCALATE)} legitimate questions do not" in status
+
+    def test_the_evaluation_set_size_is_the_real_one(self, status: str) -> None:
+        questions = evaluation_questions()
+        graded = sum(1 for q in questions if (q["expected"] or {}).get("documents_any_of"))
+        assert f"{len(questions)} questions" in status, f"the set has {len(questions)} questions"
+        assert "28/28" in status and graded == 28, graded
+
+    def test_every_round_is_recorded(self, status: str) -> None:
+        for round_number in range(1, 11):
+            assert f"**Round {round_number} " in status, f"round {round_number} is not recorded"
 
 
 class TestAcceptanceCriteriaCoverage:
