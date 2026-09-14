@@ -27,6 +27,7 @@ from typing import Any
 
 from pydantic import BaseModel, Field, field_validator
 
+from app.ai.incident_shape import SHAPE_SIGNAL, detect_incident_shape
 from app.ai.llm import LLMClient, get_llm_client
 from app.ai.structured import clamp_confidence, parse_model
 from app.core.config import Settings, get_settings
@@ -169,9 +170,47 @@ RISK_RULES: tuple[tuple[RiskLevel, str, str], ...] = (
         r"[\s\S]{0,25}?\b(?:are|is|were|was|went)\s+(?:missing|lost|gone|stolen)\b"
         r"[\s\S]{0,40}?\b(?:attacker|hacker|thief|criminal|outsider|third[\s-]party)\b",
     ),
-    # KB-009: "Malware on a server, or on more than three endpoints" is S1 - a
-    # different severity from malware on one endpoint, which is why the two rules
-    # are separate rather than one broad "malware" match.
+    # KB-009 S1: confirmed data exfiltration - and the ways people actually report it.
+    # Data offered for sale, extortion, intellectual property in someone else's hands,
+    # an insider walking out with records, documents that turned up in public. Six of
+    # these were measured landing in `out_of_scope`/`low`: no ticket, no human.
+    (
+        RiskLevel.CRITICAL,
+        "data_offered_or_exposed",
+        r"\b(?:sold|selling|for\s+sale|published|posted|dumped|appeared\s+(?:online|publicly|on))\b"
+        r"[\s\S]{0,40}?\b(?:data|database|records?|documents?|files?|source\s+code|"
+        r"customer\s+list|customers?|client\s+(?:list|data))\b"
+        r"|\b(?:data|database|records?|documents?|files?|source\s+code|customer\s+list|"
+        r"client\s+data)\b[\s\S]{0,40}?\b(?:sold|selling|for\s+sale|published|posted|dumped|"
+        r"appeared\s+(?:online|publicly|on)|on\s+the\s+dark\s+web|held\s+to\s+ransom)\b"
+        r"|\b(?:blackmail\w*|extort\w*|held\s+to\s+ransom)\b"
+        r"|\b(?:attacker|hacker|intruder|outsider|criminal|thief)\b[\s\S]{0,30}?"
+        r"\b(?:has|have|had|got|took|stole|stolen|holds|holding|accessed|downloaded|exported)\b"
+        r"[\s\S]{0,30}?\b(?:source\s+code|data|database|records?|customer\s+list|client\s+data|"
+        r"credentials?|mailbox|account)\b"
+        r"|\b(?:former\s+employee|ex-employee|insider)\b[\s\S]{0,40}?"
+        r"\b(?:walked\s+out\s+with|left\s+with|took|stole|stolen|downloaded|exported)\b",
+    ),
+    # KB-009 rates an availability incident by impact, not by intent: deleting
+    # production data needs a person whatever the cause.
+    (
+        RiskLevel.HIGH,
+        "production_data_lost",
+        r"\b(?:deleted|dropped|wiped|overwrote|overwritten|truncated)\b[\s\S]{0,30}?"
+        r"\b(?:production|the\s+production|our|the)\s[\s\S]{0,20}?"
+        r"\b(?:database|data|records?|backups?|files?)\b",
+    ),
+    # A disclosure to the wrong recipient: KB-009 S2 when restricted data is involved.
+    (
+        RiskLevel.HIGH,
+        "disclosed_to_the_wrong_recipient",
+        r"\b(?:sent|emailed|shared|forwarded|attached)\b[\s\S]{0,40}?"
+        r"\b(?:data|records?|documents?|files?|payroll|spreadsheet|report)\b[\s\S]{0,40}?"
+        r"\b(?:wrong|incorrect|mistaken)\s+(?:address|recipient|person|party|domain)\b"
+        r"|\b(?:sent|emailed|shared|forwarded)\b[\s\S]{0,40}?\b(?:to\s+the\s+wrong|"
+        r"by\s+mistake|accidentally)\b[\s\S]{0,30}?"
+        r"\b(?:data|records?|documents?|files?|payroll|spreadsheet|report|customer)\b",
+    ),
     (
         RiskLevel.CRITICAL,
         "malware_on_server",
@@ -581,7 +620,7 @@ class RiskClassifier:
                 )
 
         if not signals:
-            return self._fallback_assessment(intent)
+            return self._fallback_assessment(intent, text)
 
         best_level = min(
             (signal.level for signal in signals),
@@ -597,8 +636,9 @@ class RiskClassifier:
             reason=f"matched: {labels}",
         )
 
-    def _fallback_assessment(self, intent: Intent | None) -> RiskAssessment:
-        """No rule matched. The intent still carries a sensible default.
+    def _fallback_assessment(self, intent: Intent | None, text: str = "") -> RiskAssessment:
+        """No rule matched. The intent carries a sensible default - unless the message
+        has the *shape* of an incident report, which is the backstop against silence.
 
         These defaults follow the incident severity standard published in the
         knowledge base (KB-009). A classifier that disagrees with the documented
@@ -608,7 +648,35 @@ class RiskClassifier:
           blocked without paging anybody;
         * an incident report with no confirmed impact is S3 (medium);
         * a service request or a question is S4 (low).
+
+        A finite rule set cannot cover every way a person describes a breach, and when
+        one fell outside it the turn became `out_of_scope`/`low`, which meant no
+        source, no ticket and no human. When the message pairs an incident noun with a
+        compromise verb, the assessment is floored at **medium** and carries the
+        `incident_shape` signal, so the workflow tracks the report and asks the
+        decisive question instead of behaving as though nothing was said. Medium is
+        the floor rather than high because the backstop cannot tell severity - what it
+        can tell is that this is not a question to drop.
         """
+        shape = detect_incident_shape(text)
+        if shape is not None and intent is not Intent.SECURITY_INCIDENT:
+            # SECURITY_INCIDENT already defaults to medium; the backstop exists for the
+            # turns the classifier placed somewhere harmless.
+            signal = RiskSignal(
+                label=SHAPE_SIGNAL,
+                level=RiskLevel.MEDIUM,
+                evidence=shape.evidence,
+            )
+            return RiskAssessment(
+                level=RiskLevel.MEDIUM,
+                signals=(signal,),
+                source="incident_shape",
+                reason=(
+                    f"no rule matched, but the message reports {shape.noun} "
+                    f"{shape.verb} - tracked, not dropped"
+                ),
+            )
+
         defaults = {
             Intent.SECURITY_INCIDENT: (
                 RiskLevel.MEDIUM,

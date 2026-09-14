@@ -41,11 +41,59 @@ logger = logging.getLogger(__name__)
 #: Lines that read like an instruction to the reader.
 ACTION_PATTERNS = (
     re.compile(r"^(?:[-*]\s+|\d+[.)]\s+)(?P<action>.+)$"),
-    re.compile(r"^(?:you\s+)?(?:must|should|never|always|do not|don't)\s+(?P<action>.+)$", re.I),
+    re.compile(r"^(?:you\s+)?(?:must|should|always)\s+(?P<action>.+)$", re.I),
+)
+
+#: Openings that make a line a *prohibition*. Measured, these were being turned into
+#: recommendations: the old pattern stripped the leading "never"/"do not" and kept the
+#: verb, so "Never approve an MFA prompt you did not initiate" became "Approve an MFA
+#: prompt", and the policy's "Do not:" list became advice to write passwords on paper.
+NEGATIVE_OPENING = re.compile(
+    r"^(?:you\s+)?(?:must\s+not|should\s+not|shall\s+not|never|do\s+not|don'?t|avoid|"
+    r"not\s+be|prohibited|forbidden|disallowed|refrain\s+from)\b",
+    re.IGNORECASE,
+)
+
+#: An introduction that puts everything after it in the negative: "Passwords must not
+#: be:", "Do not:". Bullets under one of these are prohibitions even though the bullet
+#: itself contains no negative word.
+NEGATIVE_INTRO = re.compile(
+    r"(?:must\s+not|should\s+not|do\s+not|don'?t|never|prohibited|forbidden|avoid|"
+    r"not\s+allowed|not\s+permitted)\b[^.!?]*:?\s*$",
+    re.IGNORECASE,
+)
+
+#: An introduction that puts everything after it in the positive, which ends a
+#: prohibition's reach.
+POSITIVE_INTRO = re.compile(
+    r"(?:must|should|required|requirements?|steps?|procedure|how\s+to|to\s+do\s+this|"
+    r"best\s+practice)\b[^.!?]*:?\s*$",
+    re.IGNORECASE,
+)
+
+#: A bullet has to *do* something to be an action. Without this the extractor returned
+#: fragments of lists - "Single sign-on;", "A keyboard pattern (`qwerty1234`)" - which
+#: are configuration values and prohibited examples, not instructions.
+ACTION_VERBS = frozenset(
+    {
+        "be", "use", "keep", "store", "enable", "require", "rotate", "report", "contact",
+        "change", "check", "verify", "review", "remove", "install", "update", "configure",
+        "ensure", "confirm", "notify", "follow", "apply", "replace", "delete", "set",
+        "choose", "sign", "share", "write", "send", "ask", "tell", "run", "take",
+        "disconnect", "wipe", "reset", "monitor", "validate", "restrict", "limit",
+        "protect", "approve", "reject", "escalate", "open", "close", "log", "record",
+        "turn", "switch", "join", "leave", "stop", "start", "provide", "give",
+        "put", "make", "avoid", "never", "always", "must", "should", "do", "don't",
+    }
 )
 
 #: Phrases that indicate a configuration value rather than an action.
 NON_ACTION_HINTS = ("for example", "such as", "e.g.")
+
+#: Returned when nothing in the retrieved context survives the polarity filter. A field
+#: the UI renders and the ticket description quotes must not be empty, and "ask the
+#: service desk" is the one action that is always true of a security assistant.
+DEFAULT_ACTIONS = ("Contact the IT service desk if this does not answer your question.",)
 
 MAX_ACTIONS = 5
 
@@ -77,20 +125,49 @@ class GeneratedAnswer:
 
 
 def extract_actions(context: str, *, limit: int = MAX_ACTIONS) -> list[str]:
-    """Pull imperative lines out of the retrieved context.
+    """Pull actionable instructions out of the retrieved context.
 
     Deterministic extraction rather than a second model call: it keeps the
     offline path honest (every action is traceable to a document) and it costs
     nothing. Phase 6 consumes these when deciding what a ticket should say.
 
+    **Polarity matters more than recall here.** A security policy is written as a
+    mixture of requirements and prohibitions, and the first version of this function
+    lifted both indiscriminately: asked "Show me the password policy" it recommended
+    "Write passwords on paper kept at your desk", "Save passwords in plain text files"
+    and "Share a password with a colleague" - the policy's *prohibitions* - and it
+    turned "Never approve an MFA prompt you did not initiate" into "Approve an MFA
+    prompt...", because the pattern stripped the leading "never" and kept the verb.
+    Recommending the prohibited practice is worse than recommending nothing, so:
+
+    * a line whose own opening is negative is dropped;
+    * a bullet under a negative introduction ("Passwords must not be:", "Do not:") is
+      dropped, even though the bullet itself contains no negative word;
+    * a bullet has to open with something that *does* something - the lists of
+      permitted mechanisms and prohibited examples are not instructions.
+
     Lines truncated by a chunk boundary are skipped rather than shown as
-    half-sentences.
+    half-sentences. An empty result is a legitimate outcome; the caller substitutes
+    ``DEFAULT_ACTIONS``.
     """
     actions: list[str] = []
     seen: set[str] = set()
+    prohibitions_in_force = False
 
     for sentence in split_sentences(context):
         stripped = sentence.strip()
+
+        # Track which side of the policy we are on. An introduction governs the
+        # bullets that follow it; a positive one ends a prohibition's reach.
+        if NEGATIVE_INTRO.search(stripped):
+            prohibitions_in_force = True
+        elif POSITIVE_INTRO.search(stripped) and not NEGATIVE_INTRO.search(stripped):
+            prohibitions_in_force = False
+
+        if NEGATIVE_OPENING.match(stripped):
+            prohibitions_in_force = prohibitions_in_force or stripped.endswith(":")
+            continue
+
         for pattern in ACTION_PATTERNS:
             match = pattern.match(stripped)
             if not match:
@@ -99,12 +176,19 @@ def extract_actions(context: str, *, limit: int = MAX_ACTIONS) -> list[str]:
             lowered = action.lower()
             if len(action) < 15 or len(action) > 220:
                 break
+            if prohibitions_in_force or NEGATIVE_OPENING.match(action):
+                break
             # Check the original line, not the extracted text: the bullet marker
             # is what tells the truncation heuristic that a lower-case opening is
             # legitimate here.
             if looks_truncated(stripped):
                 break
             if any(hint in lowered for hint in NON_ACTION_HINTS):
+                break
+            first_word = re.split(r"[\s,]", lowered, maxsplit=1)[0]
+            if first_word not in ACTION_VERBS:
+                # "Single sign-on;" / "A keyboard pattern (`qwerty1234`)" - a value or
+                # an example of what not to do, not an instruction.
                 break
             if lowered in seen:
                 break
@@ -220,7 +304,7 @@ class ResponseGenerator:
                 else build_no_context_answer(role=role)
             )
 
-        actions = extract_actions(context)
+        actions = extract_actions(context) or list(DEFAULT_ACTIONS)
 
         return GeneratedAnswer(
             answer=answer,

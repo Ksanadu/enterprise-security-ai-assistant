@@ -258,6 +258,39 @@ INTENT_RULES: tuple[tuple[Intent, float, str, str], ...] = (
     ),
     (
         Intent.SECURITY_INCIDENT,
+        2.5,
+        "data_offered_or_exposed",
+        # Breach reports in the words people use: data offered for sale, extortion,
+        # intellectual property taken, an insider walking out with records, documents
+        # that turned up in public. Six of these were measured landing in `out_of_scope`
+        # with `low` risk - no source, no ticket, no human.
+        r"\b(?:sold|selling|for\s+sale|published|posted|dumped|appeared\s+(?:online|publicly|on))\b"
+        r"[\s\S]{0,40}?\b(?:data|database|records?|documents?|files?|source\s+code|"
+        r"customer\s+list|customers?|client\s+(?:list|data))\b"
+        r"|\b(?:data|database|records?|documents?|files?|source\s+code|customer\s+list|"
+        r"client\s+data)\b[\s\S]{0,40}?\b(?:sold|selling|for\s+sale|published|posted|dumped|"
+        r"appeared\s+(?:online|publicly|on)|on\s+the\s+dark\s+web|held\s+to\s+ransom|"
+        r"(?:wrong|incorrect|mistaken)\s+(?:address|recipient|person|party|domain))\b"
+        r"|\b(?:blackmail\w*|extort\w*|held\s+to\s+ransom)\b"
+        r"|\b(?:attacker|hacker|intruder|outsider|criminal|thief)\b[\s\S]{0,30}?"
+        r"\b(?:has|have|had|got|took|stole|stolen|holds|holding|accessed|downloaded|exported)\b"
+        r"[\s\S]{0,30}?\b(?:source\s+code|data|database|records?|customer\s+list|client\s+data|"
+        r"credentials?|mailbox|account)\b"
+        r"|\b(?:former\s+employee|ex-employee|insider)\b[\s\S]{0,40}?"
+        r"\b(?:walked\s+out\s+with|left\s+with|took|stole|stolen|downloaded|exported)\b",
+    ),
+    (
+        Intent.SECURITY_INCIDENT,
+        2.0,
+        "production_data_lost",
+        # An availability incident: someone dropped, deleted or overwrote production
+        # data. It matched nothing at all and was answered as an off-topic question.
+        r"\b(?:deleted|dropped|wiped|overwrote|overwritten|truncated)\b[\s\S]{0,30}?"
+        r"\b(?:production|the\s+production|our|the)\s[\s\S]{0,20}?"
+        r"\b(?:database|data|records?|backups?|files?)\b",
+    ),
+    (
+        Intent.SECURITY_INCIDENT,
         3.0,
         "privileged_account_at_risk",
         r"\b(?:admin|administrator|privileged|domain\s+admin|root|service)\s*"
@@ -308,6 +341,29 @@ INTENT_RULES: tuple[tuple[Intent, float, str, str], ...] = (
         r".{0,20}(?:account|password|credential|mailbox|mail|portal|session)",
     ),
     (Intent.PHISHING, 2.0, "clicked_link", r"\bclick(?:ed)?\s+(?:on\s+)?(?:a\s+|the\s+)?link\b"),
+    (
+        Intent.PHISHING,
+        2.2,
+        "credential_harvesting_report",
+        # A third party asking the user for credentials IS a phishing report, however
+        # it is worded: "a supplier emailed me asking for our payment system
+        # credentials", "a message asking me to confirm my login details". Both were
+        # measured landing in `out_of_scope`, so the Phishing Response SOP that answers
+        # them was never retrieved.
+        #
+        # The trailing lookahead keeps a colleague asking for help with the *document*
+        # out of it: "asked me to review the password policy" is not an attack.
+        r"\b(?:asks?|asked|asking|requests?|requested|wants?|wanted|demands?|demanded|"
+        r"needs?|needed|told|tells?|confirm|verify|e-?mails?|e-?mailed|e-?mailing|"
+        r"messaged|messaging|texted|texting|phoned|called)\b[\s\S]{0,30}?"
+        r"\b(?:me|us|for)\b[\s\S]{0,30}?"
+        r"\b(?:credential|password|login|log[\s-]?in|sign[\s-]?in|api\s*key|token|mfa|2fa|"
+        r"one[\s-]?time\s+code|access\s+code|security\s+code)\w*\b"
+        r"(?!\s+(?:polic|requirement|rule|procedure|standard|guide|review|training|awareness))"
+        r"|\b(?:e-?mail|message|call|caller|text|portal)\b[\s\S]{0,60}?"
+        r"\b(?:asks?|asked|asking|requests?|requested|wants?|wanted|confirm|verify|provide|enter)\b"
+        r"[\s\S]{0,30}?\b(?:credential|password|login|log[\s-]?in|sign[\s-]?in|api\s*key|token|mfa|2fa)\w*\b",
+    ),
     # Examining a link without clicking is still a suspicious-message report.
     (
         Intent.PHISHING,

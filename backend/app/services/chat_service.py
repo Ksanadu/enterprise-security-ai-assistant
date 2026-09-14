@@ -22,6 +22,7 @@ import re
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
+from app.ai.incident_shape import detect_incident_shape
 from app.ai.intent_classifier import IntentClassifier
 from app.ai.prompt_guard import GuardResult, PromptGuard
 from app.ai.response_generator import GeneratedAnswer, ResponseGenerator
@@ -319,10 +320,17 @@ class ChatService:
         # off-topic question ("explain the offside rule") still matches *some*
         # document, and answering from it produces a confident, cited, wrong
         # answer. Saying "that is outside what I cover" is the honest response.
-        if intent.intent is Intent.OUT_OF_SCOPE:
+        #
+        # The exception is a message with the shape of an incident report. A finite
+        # rule set cannot classify every way a breach is described, and a report the
+        # classifier missed is not an off-topic question - it is the one case where
+        # saying "I have no document for this" is the wrong answer twice over.
+        if intent.intent is Intent.OUT_OF_SCOPE and detect_incident_shape(question) is None:
             retrieval = self._empty_retrieval(question, user.role)
             logger.info("retrieval_skipped reason=out_of_scope")
         else:
+            if intent.intent is Intent.OUT_OF_SCOPE:
+                logger.info("retrieval_forced reason=incident_shape")
             retrieval = self._retrieve(question=question, history=history, role=user.role)
 
         # 4. Grounded answer generation.

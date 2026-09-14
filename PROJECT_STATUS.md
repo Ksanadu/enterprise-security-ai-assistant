@@ -310,10 +310,37 @@ as a body of ≥200 characters rather than as a front-matter key: documented in 
 - [x] Verified live: demo **71/71**, evaluation set **40/40** with **28/28** expected documents,
       and the 5 injection questions in the set still blocked (`blocked correct 40/40`).
 
+**Round 8 — a report the rules miss is no longer dropped, and advice is no longer inverted — DONE**
+
+- [x] D3 (B6) — the breach-vocabulary silence is fixed twice over. **(a) Rules:** data offered for
+      sale, extortion, intellectual property taken or held, an ex-employee walking out with
+      records, documents turning up in public, an attacker holding data or source code, production
+      data deleted, and a disclosure to the wrong recipient; plus a *credential-harvesting report*
+      intent so "a supplier emailed me asking for our payment system credentials" reaches the
+      Phishing Response SOP instead of "I have no document for this". **(b) A structural backstop**
+      (`app/ai/incident_shape.py`): when a message pairs an incident noun with a compromise verb,
+      the turn is not treated as off-topic at all — retrieval runs, the assessment is floored at
+      `medium` with an `incident_shape` signal, and the workflow tracks the report and asks the
+      decisive question. That is the reviewer's "never let a classification miss suppress
+      escalation" recommendation, made real without pretending a rule list can be complete.
+- [x] Measured: **8/10 → 0/10** breach reports silent. Six now escalate at `critical` per KB-009
+      S1; the two credential-harvesting reports are `phishing` with KB-002 cited (S4: no page, but
+      the user is told what to do).
+- [x] Precision held: the backstop fires on **0 of 14** legitimate questions and resolved cases,
+      including the KB-009 S4 "lost device, encrypted, remotely wiped" and the account-lockout
+      question the evaluation set expects at `low` (both were false positives until the nouns were
+      paired with the mitigating evidence and `locked out` was excluded).
+- [x] D4 (B7) — `recommended_actions` no longer recommends the prohibitions. A negated line
+      ("Never approve an MFA prompt…" → previously returned as "Approve an MFA prompt…"), and a
+      bullet under a prohibition heading ("Do not:" → the storage prohibitions) are dropped, and a
+      bullet must open with an action verb so list fragments ("Single sign-on;") stop counting as
+      advice. When nothing survives, the answer carries one honest default action rather than an
+      empty field.
+- [x] Rules now 52 intent / 42 risk (README and ARCHITECTURE updated); new
+      `tests/test_incident_shape.py` (43 tests) plus a polarity class in `test_ai_generator.py`.
+
 **Scheduled**
 
-- [ ] R8 — D3 breach-vocabulary silence (rules + `incident_shape` backstop) and D4
-      `recommended_actions` polarity
 - [ ] R9 — D5 the small regressions (creates_ticket, UI ticket category, dead assertions, README
       counts), D6 `/meta` `demo_users_seeded`, D8 the Chinese-scenario documentation and the
       non-Latin hint, D9 corpus dedup, D10 documentation nits

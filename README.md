@@ -93,7 +93,13 @@ specification's requirements:
 * Conversation and message persistence, with **ownership enforced in the service layer**: a
   conversation belonging to somebody else is indistinguishable from one that does not exist.
 * Grounded answers with **citations on every response** (document id, title, section, score,
-  snippet) and deterministically extracted recommended actions.
+  snippet) and deterministically extracted recommended actions - which are filtered for
+  **polarity**, because a security policy is written as a mixture of requirements and
+  prohibitions. Measured before the fix, "Show me the password policy" recommended the policy's
+  own *Do not* list ("Write passwords on paper kept at your desk", "Save passwords in plain text
+  files"), and "Never approve an MFA prompt you did not personally initiate" became "Approve an
+  MFA prompt…". A negated line, and a bullet under a prohibition heading, are no longer returned as
+  advice; when nothing survives the filter the answer carries one honest default action instead.
 * **Conversation-aware retrieval**: a bare follow-up such as "what else?" inherits the previous
   turn's subject; a self-contained question is deliberately *not* diluted with history.
 * **Per-user message throttling** (sliding window) applied before any embedding or model call.
@@ -174,11 +180,26 @@ document's identifier, title or path.
   them - and every match of every pattern is evaluated, so one reported clause cannot shield a
   later genuine demand in the same message. Both halves are asserted: 8 decoy prefaces that must be
   refused, and 7 sincere reports that must be answered.
-* **Intent classifier** over six intents, with 49 deterministic rules that need no API key. A
+* **Intent classifier** over six intents, with 52 deterministic rules that need no API key. A
   language model is consulted only when it is available *and* the rules were unsure, and it must
   answer with schema-validated JSON or the rule result stands.
-* **Risk classifier** over four levels, from 39 explicit signal rules with **negation handling**
+* **Risk classifier** over four levels, from 42 explicit signal rules with **negation handling**
   ("I did not enter my password" is not credential compromise).
+* **A finite rule set cannot cover every way a breach is described, so there is a backstop.** The
+  verification pass measured eight reports in a row - data offered for sale on the dark web, source
+  code taken by an attacker, blackmail after a leak, a customer list sold online, internal
+  documents on a public forum, an ex-employee walking out with client data, and two
+  credential-harvesting attempts - that produced **no answer source, no ticket and no escalation**.
+  The words were simply outside the rules, and the turn became `out_of_scope` with the policy
+  default of `low`: the user was told "I do not have an approved knowledge document that answers
+  this question" and nobody was notified. Now, when a message pairs an incident noun (data,
+  database, records, source code, customer list, account…) with a compromise verb (sold, stolen,
+  leaked, blackmailed, exported, published, deleted, lost…), or names an actor holding something
+  they should not, the turn is **not** treated as off-topic: retrieval runs, the assessment is
+  floored at `medium` with an `incident_shape` signal, and the workflow tracks the report and asks
+  the decisive question. Requiring both halves is what keeps it precise - it fires on zero of the
+  fourteen legitimate questions and resolved cases it is tested against, including the KB-009 S4
+  "lost device, encrypted, remotely wiped" that needs no tracking at all.
 * **Escalation is a backend decision.** High and critical always require a human; the model may
   raise a level but can never lower one; and within a conversation the level only rises, so an
   incident cannot be talked back down. The `peak_risk_level` is stored on the conversation.

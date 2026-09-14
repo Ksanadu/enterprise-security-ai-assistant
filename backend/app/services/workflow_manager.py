@@ -32,6 +32,7 @@ from typing import Literal
 
 from sqlalchemy.orm import Session
 
+from app.ai.incident_shape import SHAPE_SIGNAL
 from app.ai.turn_analysis import TurnAnalysis
 from app.core.enums import Intent, RiskLevel, Role, Severity, TicketSource, TicketStatus
 from app.db.models import Ticket, User
@@ -166,7 +167,12 @@ class WorkflowManager:
         #    not re-surfaced, leaving an audit trail of a report that produced no
         #    outcome. One incident still produces one ticket, so answering the question
         #    escalates *this* ticket rather than opening a second one.
-        if risk.level is RiskLevel.MEDIUM and intent in INCIDENT_INTENTS:
+        #
+        #    An `incident_shape` assessment counts as an incident here even when the
+        #    classifier placed the turn out of scope: the backstop exists precisely so
+        #    that a report the rules did not recognise is tracked rather than dropped.
+        shaped = any(signal.label == SHAPE_SIGNAL for signal in risk.signals)
+        if risk.level is RiskLevel.MEDIUM and (intent in INCIDENT_INTENTS or shaped):
             if existing_ticket is not None:
                 # Already being tracked; a question is not needed to re-open it.
                 return WorkflowDecision(

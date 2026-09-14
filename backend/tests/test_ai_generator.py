@@ -236,7 +236,7 @@ class TestActionExtraction:
 
     def test_actions_are_deduplicated_and_capped(self) -> None:
         context = "\n".join(
-            f"- Never do the dangerous thing number {index};" for index in range(20)
+            f"- Review the access log for the account number {index};" for index in range(20)
         )
         actions = extract_actions(context, limit=3)
         assert len(actions) == 3
@@ -244,6 +244,75 @@ class TestActionExtraction:
 
     def test_empty_context_yields_no_actions(self) -> None:
         assert extract_actions("") == []
+
+
+class TestActionPolarity:
+    """A prohibition must never be returned as a recommendation.
+
+    Measured before this was fixed: asked "Show me the password policy", the assistant
+    recommended "Write passwords on paper kept at your desk", "Save passwords in plain
+    text files, notes applications or source code" and "Share a password with a
+    colleague - every account is personal and auditable" - the policy's own **Do not**
+    list. It also turned "Never approve an MFA prompt you did not personally initiate"
+    into "Approve an MFA prompt...", because the pattern stripped the leading negation
+    and kept the verb. Recommending the prohibited practice is worse than recommending
+    nothing.
+    """
+
+    def test_a_negated_line_is_not_an_action(self) -> None:
+        for context in (
+            "- Never approve an MFA prompt you did not personally initiate",
+            "- Do not write passwords on paper kept at your desk;",
+            "- Don't share a password with a colleague, ever;",
+            "- Avoid storing credentials in a spreadsheet;",
+            "- must not be reused across a personal and a company account;",
+        ):
+            assert extract_actions(context) == [], context
+
+    def test_a_bullet_under_a_prohibition_intro_is_not_an_action(self) -> None:
+        # The real shape of the policy: the bullets carry no negative word of their own.
+        context = (
+            "Do not:\n"
+            "* write passwords on paper kept at your desk;\n"
+            "* store passwords in a browser profile that is not managed by the company;\n"
+            "* save passwords in plain text files, notes applications or source code;\n"
+            "* share a password with a colleague - every account is personal and auditable."
+        )
+        assert extract_actions(context) == []
+
+    def test_the_real_policy_context_yields_no_prohibition(self) -> None:
+        from app.core.config import get_settings
+        from app.core.enums import Role
+        from app.services.knowledge_service import KnowledgeService
+
+        settings = get_settings()
+        knowledge = KnowledgeService(settings)
+        knowledge.startup()
+        retrieval = knowledge.search("Show me the password policy", role=Role.EMPLOYEE)
+        context = "\n".join(match.chunk.text for match in retrieval.matches)
+
+        actions = extract_actions(context)
+        lowered = " ".join(actions).lower()
+        for prohibited in (
+            "paper",
+            "plain text",
+            "share a password",
+            "browser profile",
+            "single dictionary word",
+            "keyboard pattern",
+        ):
+            assert prohibited not in lowered, (prohibited, actions)
+
+    def test_a_positive_requirement_is_still_an_action(self) -> None:
+        context = "All standard user passwords must:\n* be at least 14 characters long;"
+        actions = extract_actions(context)
+        assert any("14 characters" in action for action in actions)
+
+    def test_the_default_action_covers_an_empty_extraction(self) -> None:
+        from app.ai.response_generator import DEFAULT_ACTIONS
+
+        assert DEFAULT_ACTIONS
+        assert "service desk" in DEFAULT_ACTIONS[0].lower()
 
 
 class TestResponseGenerator:
