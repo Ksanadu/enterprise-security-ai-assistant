@@ -437,7 +437,7 @@ every round, in the same commit as the change it describes.
 | Frontend `npm test` | **59 passed** (2 files) |
 | Frontend coverage | **91.4% statements / 80.4% branches / 74.4% functions**, thresholds 85 / 75 / 70 enforced |
 | `security`-marked tests | **1110** of 1476 collected (was 1067 of 1416) |
-| CI | `.github/workflows/ci.yml` runs the whole gate on push to `main` and on pull requests — **green** on `c3da181` ([run 34761249297](https://github.com/Ksanadu/enterprise-security-ai-assistant/actions/runs/34761249297)) |
+| CI | `.github/workflows/ci.yml` runs the whole gate on push to `main` and on pull requests. Green on every round since the workflow was fixed: `c1c63a4` (R7), `fb8accc` (R8), `bc4d09a` (R9), `c944644` (R10), plus `c3da181` and `7e74377` before them |
 | `backend/scripts/demo.py` | **71 / 71 checks passed** (was 67; SCENARIO 0 now demonstrates the disclosure boundary and the search limiter) |
 | Disclosure boundary (live) | anonymous `/meta` carries no AI-stack key; anonymous `/chat/capabilities` is 401; rule counts absent for employee, present for security |
 | `/knowledge/search` throttle (live) | 30 rapid searches → 20 × 200, then 429 from request 21 (same budget as chat, separate key) |
@@ -465,7 +465,9 @@ handoff states.
 
 ## Last Verified
 
-2026-09-13 — Rounds 1–6 locally, plus the CI fix verified on the runner
-(run [34761249297](https://github.com/Ksanadu/enterprise-security-ai-assistant/actions/runs/34761249297): `success`).
+2026-09-13 — verification pass plus rounds R7–R10, all green locally and on the runner
+(`scripts/check.ps1` exit 0; backend 1551 passed / 1 skipped / 95% with the floor enforced;
+frontend 62 passed with thresholds met; demo 71/71; evaluation set 40/40 with 28/28 expected
+documents; CI green on `c1c63a4`, `fb8accc`, `bc4d09a`, `c944644`).
 Local environment: Windows PowerShell 5.1, Python 3.12.10, Node 24.19.0.
 (`pwsh` is not installed on this machine; use `powershell -ExecutionPolicy Bypass -File scripts\check.ps1`.)
