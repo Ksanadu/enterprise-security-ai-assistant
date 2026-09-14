@@ -446,6 +446,14 @@ guaranteed the command could never have worked on a fresh clone, and that is fix
 - [x] Documented: `README.md` (quick start + deployment + the verification table),
       `PROJECT_HANDOFF.md` §3/§9.1/§9.2/§12, and `.env.example` gained the four `ESAA_*` Docker
       variables.
+- [x] **The image path was re-verified end to end without a container runtime.**
+      `scripts/verify-container-image.ps1` — a fresh virtualenv from `requirements.txt` *alone*, the
+      runtime stage's exact copy set, the container's own environment and its `CMD` — passed:
+      `requirements.txt` installs on its own, only `app/` and `knowledge_base/` are present plus the
+      empty mount point, uvicorn started and reported healthy, a real sign-in and question over HTTP
+      produced `intent=phishing risk=high ticket=SEC-2026-0003`, and `data\app.db` plus the vector
+      store landed **under the mount point** rather than inside the image. That is still not
+      `docker compose up`, but it is proof that the image's contents and entrypoint work.
 
 **Round 11 measured:** backend 1590 collected (1583 passed, 7 skipped), 1214 security-marked
 (was 1182), coverage floor 90 enforced; frontend 62 passed with thresholds met. Of the skips, 1 is
