@@ -235,6 +235,70 @@ class TestTicketCreationFromChat:
         assert len(all_tickets()) == before
 
 
+    def test_a_benign_follow_up_does_not_escalate_the_ticket_again(
+        self, client: TestClient, employee_headers, security_headers
+    ) -> None:
+        """The timeline records changes, not turns.
+
+        After one incident, each later turn in the conversation used to report the
+        conversation's peak risk, so every ordinary follow-up question re-fired the
+        escalation path and appended an identical `escalated` event with no state change -
+        measured, four events for one ticket after three harmless questions. The peak is
+        still remembered and any *new incident* is still held at it; a question is not an
+        incident.
+        """
+        before = len(all_tickets())
+        conversation_id = new_conversation(client, employee_headers)
+        first = ask(
+            client,
+            employee_headers,
+            conversation_id,
+            "I entered my password on a fake login page.",
+        )
+        reference = first["ticket_reference"]
+        assert reference
+
+        for question in (
+            "What does the password policy say about sharing credentials?",
+            "How long must my password be?",
+            "Where do I find the incident severity classifications?",
+        ):
+            later = ask(client, employee_headers, conversation_id, question)
+            assert later["risk_level"] == "low", (question, later["risk_level"])
+            assert later["human_escalation"] is False, question
+            assert later["workflow_action"] == "none", question
+
+        assert len(all_tickets()) == before + 1, "no second ticket"
+        ticket = client.get(
+            f"/api/v1/tickets/{reference}", headers=security_headers
+        ).json()
+        events = ticket.get("timeline") or ticket.get("events") or []
+        escalated = [event for event in events if event.get("event_type") == "escalated"]
+        assert len(escalated) == 1, f"one escalation, not one per turn: {events}"
+
+    def test_an_incident_after_the_peak_is_still_held_at_it(
+        self, client: TestClient, employee_headers
+    ) -> None:
+        # The other side of the same change: rewording an incident must not talk it down.
+        conversation_id = new_conversation(client, employee_headers)
+        first = ask(
+            client,
+            employee_headers,
+            conversation_id,
+            "All my files are encrypted and there is a ransom note.",
+        )
+        assert first["risk_level"] == "critical"
+
+        second = ask(
+            client,
+            employee_headers,
+            conversation_id,
+            "Someone may have accessed my account.",
+        )
+        assert second["risk_level"] == "critical", "the conversation's peak still floors an incident"
+        assert second["human_escalation"] is True
+        assert second["ticket_reference"] == first["ticket_reference"]
+
 class TestEscalationOfAnExistingTicket:
     def test_a_worse_turn_escalates_the_same_ticket(
         self, client: TestClient, employee_headers

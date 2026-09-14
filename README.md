@@ -203,6 +203,16 @@ document's identifier, title or path.
 * **Escalation is a backend decision.** High and critical always require a human; the model may
   raise a level but can never lower one; and within a conversation the level only rises, so an
   incident cannot be talked back down. The `peak_risk_level` is stored on the conversation.
+
+  The peak is about the *conversation*, not about relabelling every message in it, and the
+  difference was measured: one incident followed by three ordinary questions ("How long must my
+  password be?") had all three coming back as `risk=high`, `escalation=true`,
+  `action=escalate`, and appended an `escalated` event to the ticket for each - four events for
+  one ticket, none of them a state change. A turn now reports its **own** assessment; the
+  conversation still stores, remembers and reports the peak; and any **new incident** in that
+  conversation is still floored by it, so rewording an incident - or following it with a
+  harmless question - cannot talk it down. The ticket timeline records changes rather than
+  turns.
 * **Structured output is parsed, never trusted.** Model responses are extracted, validated
   against a Pydantic model, and any parse failure falls back to the deterministic path instead
   of failing the request.

@@ -560,6 +560,10 @@ _COMPILED_RULES = tuple(
 #: Phrasing that indicates the user described the situation as resolved or minor.
 MITIGATION_HINTS = ("already changed", "changed my password", "wiped", "remote wipe", "encrypted")
 
+#: Intents that describe an event which has already happened. Used by the conversation
+#: floor: an incident report is held at the conversation's peak, a question is not.
+INCIDENT_INTENTS = frozenset({Intent.PHISHING, Intent.SECURITY_INCIDENT})
+
 
 def is_negated(text: str, match_start: int) -> bool:
     """True when the text immediately before a match negates it."""
@@ -598,7 +602,7 @@ class RiskClassifier:
             # recoverable, a talked-down incident is not.
             chosen = model_assessment
 
-        return self._apply_floor(chosen, history_peak)
+        return self._apply_floor(chosen, history_peak, intent=intent)
 
     # -- rules ------------------------------------------------------------
     def assess_with_rules(
@@ -719,8 +723,33 @@ class RiskClassifier:
 
     # -- floor ------------------------------------------------------------
     @staticmethod
-    def _apply_floor(assessment: RiskAssessment, history_peak: RiskLevel | None) -> RiskAssessment:
+    @staticmethod
+    def _apply_floor(
+        assessment: RiskAssessment,
+        history_peak: RiskLevel | None,
+        *,
+        intent: Intent | None = None,
+    ) -> RiskAssessment:
+        """Hold a *new incident* at the conversation's peak; leave a question alone.
+
+        The peak is what stops an incident being talked down: once a conversation has
+        been assessed at critical, a later incident report in it is never assessed lower,
+        however it is worded. That is the invariant, and it is about the conversation's
+        state - not about labelling every subsequent message as dangerous.
+
+        It used to be applied to every turn, which made a benign follow-up report the
+        peak: measured, one incident followed by three ordinary questions produced
+        `risk=high`, `escalation=true` and `action=escalate` on all three, and appended an
+        `escalated` event to the ticket for each - four events for one ticket, none of them
+        a state change, on top of the banner the user saw on a question about password
+        length. The floor therefore applies when the turn is *itself* an incident: it
+        carries a risk signal, or the classifier placed it in an incident intent. A
+        question keeps its own level; the conversation keeps its peak.
+        """
         if history_peak is None or history_peak.rank <= assessment.level.rank:
+            return assessment
+        incident_turn = bool(assessment.signals) or intent in INCIDENT_INTENTS
+        if not incident_turn:
             return assessment
         return dataclasses.replace(
             assessment,

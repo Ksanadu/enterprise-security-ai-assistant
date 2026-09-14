@@ -401,18 +401,26 @@ class TicketService:
                 to_status=ticket.status.value,
                 note=reason[:MAX_NOTE_CHARS],
             )
-        self.record_event(
-            session,
-            ticket,
-            event_type="escalated",
-            actor=user,
-            automated=automated,
-            note=reason[:MAX_NOTE_CHARS],
-        )
+        # The `escalated` event is evidence of a *change*: a ticket that was already
+        # escalated, at the same severity and status, has not been escalated again.
+        # Recording it per turn filled the timeline with identical entries - measured,
+        # four `escalated` events for one ticket after three harmless follow-up questions
+        # - which makes the timeline a worse record, not a richer one.
+        changed = ticket.severity is not previous_severity or ticket.status is not previous_status
+        if changed:
+            self.record_event(
+                session,
+                ticket,
+                event_type="escalated",
+                actor=user,
+                automated=automated,
+                note=reason[:MAX_NOTE_CHARS],
+            )
         logger.warning(
-            "ticket_escalated reference=%s severity=%s reason=%s",
+            "ticket_escalated reference=%s severity=%s changed=%s reason=%s",
             ticket.reference,
             ticket.severity.value,
+            changed,
             reason[:80],
         )
         return ticket

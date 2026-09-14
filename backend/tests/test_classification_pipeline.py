@@ -83,6 +83,15 @@ class TestDemoScenario:
         assert second["peak_risk_level"] == "high"
 
     def test_the_risk_does_not_come_back_down(self, client: TestClient, employee_headers) -> None:
+        """The conversation keeps its peak; a thank-you note is not an incident.
+
+        This test used to assert that "Thanks, that helps." came back as `high` with a
+        mandatory escalation, because the conversation's peak was applied to every turn.
+        Measured, that made three ordinary follow-up questions report a mandatory human
+        escalation and append three no-op `escalated` events to the ticket. What the
+        invariant actually requires is that the *conversation* never forgets and that a
+        later incident cannot be talked down - both asserted here.
+        """
         conversation_id = new_conversation(client, employee_headers)
         ask(
             client,
@@ -90,11 +99,24 @@ class TestDemoScenario:
             conversation_id,
             "I entered my password on a phishing page.",
         )
-        follow_up = ask(client, employee_headers, conversation_id, "Thanks, that helps.")
 
-        assert follow_up["risk_level"] == "high"
-        assert follow_up["human_escalation"] is True
-        assert follow_up["risk_reason"].startswith("held at high")
+        follow_up = ask(client, employee_headers, conversation_id, "Thanks, that helps.")
+        assert follow_up["risk_level"] == "low"
+        assert follow_up["human_escalation"] is False
+        # The conversation still remembers, and still reports it.
+        assert follow_up["peak_risk_level"] == "high"
+        assert conversation_peak(conversation_id) == "high"
+
+        # And a new incident in the same conversation is held at that peak: this one
+        # scores medium on its own (a click with nothing entered) and comes back high.
+        incident = ask(
+            client,
+            employee_headers,
+            conversation_id,
+            "I clicked the link in that email but did not enter anything.",
+        )
+        assert incident["risk_level"] == "high"
+        assert incident["risk_reason"].startswith("held at high")
 
     def test_escalation_is_audited(self, client: TestClient, employee_headers) -> None:
         conversation_id = new_conversation(client, employee_headers)

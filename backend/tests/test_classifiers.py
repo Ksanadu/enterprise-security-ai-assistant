@@ -255,16 +255,50 @@ class TestRiskClassifier:
         assert {signal.label for signal in assessment.signals} == {"clicked_link"}
 
     # -- escalation floor -------------------------------------------------
-    def test_risk_never_drops_below_the_conversation_peak(self, settings) -> None:
+    def test_a_new_incident_is_held_at_the_conversation_peak(self, settings) -> None:
+        """The invariant: an incident cannot be talked down by rewording it.
+
+        The conversation has already been assessed at critical; this message on its own
+        scores high, and the floor holds it at the conversation's level.
+        """
+        assessment = RiskClassifier(settings).assess(
+            "Someone may have accessed my account.",
+            intent=Intent.SECURITY_INCIDENT,
+            history_peak=RiskLevel.CRITICAL,
+        )
+        assert assessment.level is RiskLevel.CRITICAL
+        assert assessment.requires_escalation is True
+        assert assessment.escalated_from is RiskLevel.HIGH
+        assert "already assessed" in assessment.reason
+
+    def test_the_peak_does_not_relabel_a_question(self, settings) -> None:
+        """A follow-up question is not a new incident, and must not be reported as one.
+
+        Measured before this was fixed: after one incident, three ordinary questions in
+        the same conversation each came back as `risk=high`, `escalation=true`,
+        `action=escalate`, with an `escalated` event appended to the ticket for each - so
+        the user saw a mandatory-human banner on "How long must my password be?", and the
+        ticket timeline held four escalation events that recorded no change. The
+        conversation still *remembers* the peak (`peak_risk_level` is stored, monotonic
+        and reported); this turn simply reports what it is.
+        """
         assessment = RiskClassifier(settings).assess(
             "Thanks, that is helpful.",
             intent=Intent.SECURITY_FAQ,
             history_peak=RiskLevel.HIGH,
         )
-        assert assessment.level is RiskLevel.HIGH
-        assert assessment.requires_escalation is True
-        assert assessment.escalated_from is RiskLevel.LOW
-        assert "already assessed" in assessment.reason
+        assert assessment.level is RiskLevel.LOW
+        assert assessment.requires_escalation is False
+        assert assessment.escalated_from is None
+
+    def test_the_peak_does_not_relabel_a_policy_question(self, settings) -> None:
+        assessment = RiskClassifier(settings).assess(
+            "What does the password policy say about sharing credentials?",
+            intent=Intent.POLICY_QUESTION,
+            history_peak=RiskLevel.CRITICAL,
+        )
+        assert assessment.level is RiskLevel.LOW
+        assert assessment.requires_escalation is False
 
     def test_floor_does_not_lower_a_higher_current_level(self, settings) -> None:
         assessment = RiskClassifier(settings).assess(

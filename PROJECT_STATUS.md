@@ -374,9 +374,27 @@ as a body of ≥200 characters rather than as a front-matter key: documented in 
       therefore includes escalated tickets (schema comment); the KB `content` field is validated
       as a body of ≥200 characters rather than as a front-matter key (loader comment).
 
-**Scheduled**
+**Round 10 — the conversation keeps its peak; a question is not an incident — DONE**
 
-- [ ] R10 — D7 sticky-peak escalation semantics (last: riskiest, needs the whole suite and demo)
+- [x] D7 (B9) — a sticky peak relabelled every later turn. Measured: one incident followed by
+      three ordinary questions produced `risk=high`, `escalation=true`, `action=escalate` on all
+      three, showed the user a mandatory-human banner while answering "How long must my password
+      be?", and appended an `escalated` event to the ticket for each — **four events for one
+      ticket, none of them a state change**. Now:
+      - a turn reports its **own** assessment;
+      - the conversation still stores, remembers and reports `peak_risk_level` (monotonic), so
+        §7.3's "an incident cannot be talked down" is untouched;
+      - a **new incident** in that conversation is still floored by the peak — a click with
+        nothing entered after a critical report comes back critical, with the reason saying so;
+      - the ticket timeline records **changes**, not turns.
+- [x] Verified live: the same three-question conversation now reports `low` / `no escalation` /
+      `action=none`, and the ticket shows **2 events, 1 escalated** (was 5 events, 4 escalated).
+- [x] The two tests that encoded the old behaviour are rewritten to the corrected invariant, with
+      the measurement that motivated it in their docstrings — this was a deliberate behaviour
+      change, not a silent one.
+
+**All ten planned rounds are done** (R1–R10). The verification pass that produced them, and the
+decisions behind each round, are in the decision log above.
 
 ## What remains
 
