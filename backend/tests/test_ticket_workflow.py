@@ -534,6 +534,48 @@ class TestWorkflowDecisionUnit:
         assert decision.escalation_required is True
         assert decision.owner_role is Role.SECURITY
 
+    def test_the_decision_reports_whether_it_files_a_ticket(self) -> None:
+        """`creates_ticket` must describe what `apply` does, including `clarify`.
+
+        The medium tier files a tracking ticket while it asks its question, so a
+        decision whose action is `clarify` creates a ticket and the property has to say
+        so - it reported `False` for a round after the tracking change, which is exactly
+        the kind of quiet lie an integration would build on.
+        """
+        from app.ai.risk_classifier import RiskAssessment
+        from app.core.enums import Intent, RiskLevel
+
+        tracking = WorkflowManager().decide(
+            analysis=self._analysis(
+                intent=Intent.PHISHING,
+                risk=RiskAssessment(
+                    level=RiskLevel.MEDIUM, signals=(), source="rules", reason="t"
+                ),
+                peak_risk=RiskLevel.MEDIUM,
+            ),
+            question="I clicked the link but entered nothing.",
+        )
+        assert tracking.action == "clarify"
+        assert tracking.creates_ticket is True
+        assert tracking.escalates_ticket is False
+        assert tracking.initial_status is TicketStatus.OPEN
+
+        escalating = WorkflowManager().decide(
+            analysis=self._analysis(), question="All my files are encrypted."
+        )
+        assert escalating.action == "create"
+        assert escalating.creates_ticket is True
+
+        nothing = WorkflowManager().decide(
+            analysis=self._analysis(
+                intent=Intent.SECURITY_FAQ,
+                risk=RiskAssessment(level=RiskLevel.LOW, signals=(), source="rules", reason="t"),
+                peak_risk=RiskLevel.LOW,
+            ),
+            question="What are the password requirements?",
+        )
+        assert nothing.creates_ticket is False
+
     def test_it_support_is_a_suggestion(self) -> None:
         from app.ai.risk_classifier import RiskAssessment
         from app.core.enums import Intent, RiskLevel

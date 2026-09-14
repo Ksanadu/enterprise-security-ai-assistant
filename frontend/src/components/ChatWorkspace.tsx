@@ -63,10 +63,19 @@ export function ChatWorkspace({ user, onSignOut, maxMessageLength = 2000 }: Chat
         '\n\nReason: the knowledge base answer did not resolve the problem.',
       ].join('')
 
-      // The category decides the owning queue on the server: a security category
-      // goes to the security team, anything else to the raiser's own team. The
-      // severity is the server's decision either way - the client never sends one.
-      const category = message.payload?.intent === 'it_support' ? 'it' : 'security'
+      // The category decides the owning queue on the server: a security category goes
+      // to the security team at medium severity, anything else to the raiser's own team
+      // at low. It used to send `security` for everything that was not IT support -
+      // which, once the server started routing by category, filed a security-owned
+      // medium ticket when someone pressed this button on a plain policy answer. A
+      // question is not an incident, so it goes to `other` and the raiser's own team.
+      const category =
+        message.payload?.intent === 'it_support'
+          ? 'it'
+          : message.payload?.intent === 'phishing' ||
+              message.payload?.intent === 'security_incident'
+            ? 'security'
+            : 'other'
 
       void chat.raiseTicket(message.id, title, description, category)
     },

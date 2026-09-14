@@ -210,7 +210,10 @@ export function useChat(onUnauthorized: () => void): UseChatResult {
   const dismissError = useCallback(() => setError(null), [])
 
   const raiseTicket = useCallback(
-    async (messageId: number, title: string, description: string, category = 'security') => {
+    // `other` rather than `security`: the category decides the owning queue on the
+    // server, and defaulting a self-raised ticket to the security queue would file
+    // routine requests there at medium severity.
+    async (messageId: number, title: string, description: string, category = 'other') => {
       setError(null)
       setNotice(null)
       setRaisingTicketId(messageId)

@@ -77,7 +77,14 @@ class WorkflowDecision:
 
     @property
     def creates_ticket(self) -> bool:
-        return self.action == "create"
+        """Whether applying this decision files a ticket.
+
+        True for ``clarify`` as well as ``create``: since the medium tier tracks a report
+        while it asks its question, both actions put a row in the queue. The property
+        said only ``create`` for one round after that change, which made it a lie about
+        the action it describes.
+        """
+        return self.action in {"create", "clarify"}
 
     @property
     def escalates_ticket(self) -> bool:

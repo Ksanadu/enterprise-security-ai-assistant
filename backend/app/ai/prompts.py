@@ -70,13 +70,28 @@ def build_user_prompt(
     )
 
 
-def build_no_context_answer(*, role: Role) -> str:
+def build_no_context_answer(*, role: Role, non_latin_question: bool = False) -> str:
     """Deterministic fallback when nothing relevant was retrieved.
 
     It must not hint that other documents exist: telling a user "there is a
     restricted document that might answer this" would leak the existence of
     material outside their access level.
+
+    ``non_latin_question`` says the message contained no Latin script at all. The
+    knowledge base, the tokenizer and every rule are English-only - documented
+    honestly in the README and asserted as ``language-001`` in the evaluation set -
+    and a Chinese question therefore matches nothing. Saying "I do not have a
+    document for this" is true but unhelpful: the user cannot tell whether the
+    knowledge base lacks the answer or the assistant cannot read the question. They
+    are told which it is.
     """
+    if non_latin_question:
+        return (
+            "I can only search the English-language knowledge base at the moment, and "
+            "this question is not in English, so I could not look anything up. Please "
+            "ask again in English, or contact the IT service desk — see the Security "
+            "Contact Guide (KB-011)."
+        )
     if role is Role.EMPLOYEE:
         return (
             "I do not have an approved knowledge document that answers this "

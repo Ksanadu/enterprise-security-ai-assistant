@@ -339,11 +339,43 @@ as a body of ≥200 characters rather than as a front-matter key: documented in 
 - [x] Rules now 52 intent / 42 risk (README and ARCHITECTURE updated); new
       `tests/test_incident_shape.py` (43 tests) plus a polarity class in `test_ai_generator.py`.
 
+**Round 9 — the small regressions, and the honest answer for a language we cannot read — DONE**
+
+- [x] D5a — `WorkflowDecision.creates_ticket` reported `False` for `clarify` even though that
+      action files the tracking ticket: a quiet lie about the action it describes. It is true for
+      both `create` and `clarify` now, with a test that pins all three actions.
+- [x] D5b — the UI sent `category: 'security'` for every answer that was not IT support. Once the
+      server began routing by category, pressing "Create ticket" on a *policy* answer filed a
+      security-owned ticket at medium severity. It now maps `it_support → it`, `phishing` /
+      `security_incident → security`, everything else → `other` (the raiser's own team, low), and
+      the hook's default is `other` rather than `security`. Two tests assert the question case.
+- [x] D5c — the two "can never fail" assertions are gone: `.length >= 1` on a `getAllByText`
+      result is decorative by construction, so the queried **count** is asserted (exactly 1 in the
+      answer body, exactly 2 across the message) and a duplicate or a missing node now fails.
+- [x] D5d — README counts corrected to 1548 collected / 95% coverage, with the phase-history
+      bullet left numberless. The README's own consistency test (`test_the_backend_test_count_is_
+      the_same_everywhere_it_appears`) caught the first attempt at this: it requires one current
+      total in four places and one coverage figure in the file.
+- [x] D6 — `/meta` no longer publishes `demo_users_seeded`: no client read it, and to an anonymous
+      caller it answered exactly one question ("are seeded demo accounts live here?").
+      `environment` and `demo_login` stay, because the sign-in screen needs them.
+- [x] D8 — the Chinese-scenario gap is documented as the **largest known gap against the
+      specification** (three of §2's four scenarios return `out_of_scope` with no source, because
+      every rule, the guard, the shape backstop and the tokenizer are ASCII), with the reason it is
+      a capability rather than a defect. What *is* fixed: a message containing no Latin letters at
+      all now gets "I can only search the English-language knowledge base at the moment, and this
+      question is not in English" instead of implying the knowledge base has nothing on the subject.
+      Verified for Chinese input and asserted not to fire for English.
+- [x] D9 — the evaluation set's injection questions are now read through one module
+      (`tests/corpora.py`) and the guard asserts the two corpora cannot diverge *behaviourally*:
+      every question the set expects refused must be refused by the guard directly. (The
+      duplication was near-verbatim rather than letter-for-letter, which drifts more quietly.)
+- [x] D10 — documented rather than changed: `open` in ticket statistics means "not terminal" and
+      therefore includes escalated tickets (schema comment); the KB `content` field is validated
+      as a body of ≥200 characters rather than as a front-matter key (loader comment).
+
 **Scheduled**
 
-- [ ] R9 — D5 the small regressions (creates_ticket, UI ticket category, dead assertions, README
-      counts), D6 `/meta` `demo_users_seeded`, D8 the Chinese-scenario documentation and the
-      non-Latin hint, D9 corpus dedup, D10 documentation nits
 - [ ] R10 — D7 sticky-peak escalation semantics (last: riskiest, needs the whole suite and demo)
 
 ## What remains

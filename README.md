@@ -376,7 +376,10 @@ field nobody reads is not an answer.
   identical classification and identical escalation, while retrieval differs and stays in scope.
 * **1067 security-marked tests** covering RBAC, injection, leakage, session handling, ticket
   scoping, redaction and the deployment assets, runnable as one suite with `pytest -m security`.
-* 1415 backend tests, **94% statement coverage**; `ruff`, `mypy`, `tsc` and `eslint` clean.
+* 1548 backend tests, **95% statement coverage** (the coverage floor is enforced by the gate);
+  `ruff`, `mypy`, `tsc` and `eslint` clean. The phase this section describes closed with a smaller
+  suite; the figure above is the current one, and the four places in this README that state it are
+  asserted to agree by `tests/test_documentation.py`.
 
 The set immediately earned its keep. Writing it exposed a set of real defects:
 
@@ -535,7 +538,7 @@ stale cached index). A mismatch is logged as a security event and the chunk is d
 │   ├── scripts/
 │   │   ├── demo.py               # the executable demonstration (71 checks)
 │   │   └── update_evaluation_expectations.py
-│   ├── tests/                    # 1415 tests
+│   ├── tests/                    # 1548 tests
 │   └── requirements*.txt
 ├── frontend/
 │   ├── Dockerfile                # Vite build stage → nginx runtime stage
@@ -857,10 +860,19 @@ Honest limitations of the default offline embedder:
   Both figures were re-measured against the live API during the stabilization pass - the shipped
   `.env` had drifted to 0.7 while every test used 0.5, which is why the drift is now asserted
   (see "Configuration is asserted, not assumed" below).
-* The knowledge base is **English-only**. A Chinese question is classified as out of scope and
-  gets the honest "I do not have an approved document for this" reply rather than a wrong
-  answer; the evaluation set asserts this as a known limitation rather than pretending
-  otherwise.
+* **The knowledge base is English-only, and so is every rule.** `PRODUCT_SPEC.md` §2 states its
+  four scenarios in Chinese, and measured, **three of the four return `out_of_scope` with no
+  source**: the intent rules, the risk rules, the guard patterns, the incident-shape backstop and
+  the tokenizer (`[a-z][a-z0-9_]{1,}`) are all ASCII, so a Chinese question matches nothing and
+  retrieves nothing. Scenario D is the near miss - the literal token `VPN` survives, so it is
+  classified and answered. This is the **largest known gap against the specification** and it is a
+  capability, not a defect: a multilingual deployment needs multilingual rules, tokenizer and
+  embeddings, and a regex patch over the Chinese phrasings in §2 would be worse than the honest
+  gap. Two things are done about it rather than around it: the evaluation set asserts the
+  limitation as `language-001` (expected `out_of_scope`), and when a message contains no Latin
+  letters at all the answer says so - "I can only search the English-language knowledge base at
+  the moment, and this question is not in English" - instead of implying the knowledge base has
+  nothing on the subject.
 * The knowledge base has **content gaps**. Account lockout, for example, has no document; the
   evaluation entry for it records the gap instead of being tuned away. The assistant returns
   the closest documents, which is the honest weak spot of a lexical retriever.
@@ -876,12 +888,12 @@ The suite has three layers:
 
 | Layer | What it covers | How to run |
 | ----- | -------------- | ---------- |
-| Unit and integration (1415 tests) | Every module: config guards, ORM, RAG, classifiers, services, API, deployment assets | `pytest -q` |
+| Unit and integration (1548 tests) | Every module: config guards, ORM, RAG, classifiers, services, API, deployment assets | `pytest -q` |
 | Security (1067 tests) | RBAC, injection, leakage, sessions, ticket scoping, redaction, deployment hardening | `pytest -m security` |
 | Evaluation (61 tests) | The 40-question set and the end-to-end demo walkthrough | `pytest -m evaluation` |
 
 ```powershell
-# backend: 1415 tests, 94% statement coverage
+# backend: 1548 tests, 95% statement coverage (floor 90)
 cd backend
 .\.venv\Scripts\python.exe -m pytest -q
 .\.venv\Scripts\python.exe -m pytest -m security -q          # security subset

@@ -16,6 +16,7 @@ from app.ai.response_generator import ResponseGenerator, extract_actions
 from app.core.enums import Role
 from app.rag.documents import Chunk, ScoredChunk
 from app.rag.retriever import RetrievalResult
+from tests.conftest import DEMO_ACCOUNTS, DEMO_PASSWORD
 
 # The header mirrors the retriever's format; the em dash and the section
 # separator (U+203A) are written as escapes so the source stays pure ASCII.
@@ -223,6 +224,47 @@ class TestPrompts:
         assert "restricted" not in answer.lower()
         assert "permission" not in answer.lower()
         assert "you cannot" not in answer.lower()
+
+
+class TestNonEnglishInputIsExplained:
+    """The knowledge base is English-only; saying so is the honest answer.
+
+    `PRODUCT_SPEC.md` §2 states its four scenarios in Chinese and the rules, tokenizer
+    and retriever are all English-only, so those questions match nothing. "I do not have
+    an approved knowledge document" is true but leaves the user unable to tell whether
+    the knowledge base lacks the answer or the assistant cannot read the question.
+    """
+
+    def test_the_no_context_answer_says_english_only_when_asked_in_another_script(self) -> None:
+        answer = build_no_context_answer(role=Role.EMPLOYEE, non_latin_question=True)
+        assert "english" in answer.lower()
+        assert "do not have an approved knowledge document" not in answer.lower()
+
+    def test_an_english_question_keeps_the_ordinary_answer(self) -> None:
+        answer = build_no_context_answer(role=Role.EMPLOYEE)
+        assert "do not have an approved knowledge document" in answer.lower()
+
+    def test_the_pipeline_uses_it_for_chinese_input_and_not_for_english(self, client) -> None:
+        token = client.post(
+            "/api/v1/auth/login",
+            json={"email": DEMO_ACCOUNTS["employee"], "password": DEMO_PASSWORD},
+        ).json()["access_token"]
+        headers = {"Authorization": f"Bearer {token}"}
+
+        def ask(question: str) -> str:
+            conversation = client.post(
+                "/api/v1/chat/conversations", json={}, headers=headers
+            ).json()
+            return client.post(
+                f"/api/v1/chat/conversations/{conversation['id']}/messages",
+                json={"content": question},
+                headers=headers,
+            ).json()["assistant_message"]["payload"]["answer"]
+
+        # The fullwidth question mark is the point: this is PRODUCT_SPEC.md §2's own
+        # wording, in Chinese, and the message must contain no Latin script at all.
+        assert "not in English" in ask("公司密码有什么要求？")  # noqa: RUF001
+        assert "not in English" not in ask("Please explain the offside rule in football.")
 
 
 class TestActionExtraction:

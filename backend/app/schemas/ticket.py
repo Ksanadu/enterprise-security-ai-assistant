@@ -54,6 +54,12 @@ class TicketListResponse(BaseModel):
 
 
 class TicketStatisticsResponse(BaseModel):
+    #: Counts of the tickets the caller can see, computed in SQL over the same visibility
+    #: filter as the list and with no page cap. `open` means "not resolved and not closed"
+    #: and therefore *includes* escalated tickets - which is why `open` and `escalated`
+    #: can both be non-zero for the same row set. The key is named for what it counts
+    #: (`is_open` on the model) rather than renamed, because renaming a field is a
+    #: contract change with no correctness gain.
     statistics: dict = Field(default_factory=dict)
 
 

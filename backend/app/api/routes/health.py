@@ -52,18 +52,19 @@ def health(request: Request, session: DbSession, settings: AppSettings) -> Healt
 def meta(settings: AppSettings) -> MetaResponse:
     """The minimum an unauthenticated client needs to render the app.
 
-    Name, version, environment and the feature flags the sign-in screen depends on.
+    Name, version, environment and the one feature flag the sign-in screen needs.
     Nothing about the AI stack: an anonymous caller used to learn the provider, the
-    model, the embedding backend, the vector store, the retrieval `top_k` and that
-    demo users were seeded, which is a target list rather than a feature list.
+    model, the embedding backend, the vector store and the retrieval `top_k`, which is
+    a target list rather than a feature list.
+
+    `demo_users_seeded` is gone as well. It was never read by any client, and as an
+    anonymous field it answered exactly one question - "are seeded demo accounts live
+    here?" - which is the wrong question to answer to an unauthenticated caller.
     """
     return MetaResponse(
         app_name=settings.app_name,
         version=__version__,
         environment=settings.app_env,
-        features={
-            "demo_login": settings.demo_login_enabled,
-            "demo_users_seeded": settings.seed_demo_users,
-        },
+        features={"demo_login": settings.demo_login_enabled},
         roles=[role.value for role in Role],
     )

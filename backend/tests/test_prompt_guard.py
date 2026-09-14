@@ -10,6 +10,7 @@ from __future__ import annotations
 import pytest
 
 from app.ai.prompt_guard import PromptGuard
+from tests.corpora import expected_blocked_questions
 
 pytestmark = pytest.mark.security
 
@@ -384,6 +385,14 @@ class TestInjectionCoverageIsMeasured:
         alarms = [q for q in LEGITIMATE_COUNTERPARTS if guard.scan_query(q).blocked]
         assert not alarms, f"{len(alarms)} false alarm(s): {alarms}"
 
+    def test_the_documented_corpus_size_is_the_real_one(self) -> None:
+        # The README states the corpus size in prose ("a corpus of 31 attempts across
+        # six techniques"). A corpus that grew without the sentence being updated is a
+        # document that quietly disagrees with the product.
+        total = sum(len(items) for items in INJECTION_CORPUS.values())
+        assert total == 31, f"the README says 31 attempts; the corpus has {total}"
+        assert len(INJECTION_CORPUS) == 6
+
     def test_a_blocked_attempt_reports_a_category(self) -> None:
         # A refusal with no category cannot be audited or explained.
         guard = PromptGuard()
@@ -392,6 +401,31 @@ class TestInjectionCoverageIsMeasured:
                 result = guard.scan_query(attempt)
                 assert result.categories, attempt
                 assert result.reason, attempt
+
+
+class TestTheEvaluationSetAndTheGuardAgree:
+    """The same injections live in two files; behaviour is what must not drift.
+
+    The evaluation set is a JSON fixture and this file's corpus is Python, and the
+    phrasings overlap without being letter-for-letter identical. Asserting the *outcome*
+    for every question the set expects to be refused catches the drift that matters -
+    a guard that blocks its own corpus while letting the evaluation set's versions
+    through is a guard whose two documents disagree.
+    """
+
+    def test_every_question_the_set_expects_refused_is_refused_by_the_guard(self) -> None:
+        expected = expected_blocked_questions()
+        assert expected, "the evaluation set must contain adversarial cases"
+        missed = [q for q in expected if not PromptGuard().scan_query(q).blocked]
+        assert not missed, "the evaluation set expects these to be refused: " + "; ".join(missed)
+
+    def test_the_shared_phrasings_are_present_in_both_corpora(self) -> None:
+        corpus = {q for items in INJECTION_CORPUS.values() for q in items}
+        shared = [q for q in expected_blocked_questions() if q in corpus]
+        assert shared, (
+            "no phrasing is shared between the evaluation set and the guard corpus, so "
+            "the two have silently diverged"
+        )
 
 
 class TestDocumentRequestsAreAnsweredNotRefused:

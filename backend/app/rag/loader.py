@@ -41,6 +41,12 @@ ALLOWED_KEYS = frozenset(
     }
 )
 
+#: Front-matter keys every document must carry. `content` is required by
+#: `PRODUCT_SPEC.md` §5 as well, but not as a front-matter key: it is the Markdown body
+#: (or an inline `content` key), and it is validated by MIN_CONTENT_CHARS below rather
+#: than by presence - so a document with the four keys above and an empty body is still
+#: rejected. The distinction is recorded here because a reader comparing this tuple with
+#: the specification would otherwise conclude that `content` is unchecked.
 REQUIRED_KEYS = ("document_id", "title", "category", "allowed_roles")
 
 MIN_CONTENT_CHARS = 200

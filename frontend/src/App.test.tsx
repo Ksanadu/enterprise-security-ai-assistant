@@ -26,7 +26,7 @@ const meta: MetaResponse = {
   app_name: 'Enterprise Security AI Assistant',
   version: '0.1.0',
   environment: 'test',
-  features: { demo_login: true, demo_users_seeded: true },
+  features: { demo_login: true },
   roles: ['employee', 'it', 'security'],
 }
 
@@ -332,13 +332,14 @@ describe('chat workspace', () => {
 
     // `findAllBy*` rejects when nothing matches, so the old
     // `expect(...length).toBeGreaterThan(0)` could never fail - the await was doing
-    // the work and the assertion was decoration. What matters is *where* the text
-    // appears: in the answer body, not only in the citation snippet beside it.
+    // the work and the assertion was decoration. Rewriting it as `.length >= 1` on the
+    // same query kept it decorative, so the query itself is the assertion now: `getByText`
+    // throws when the text is absent *and* when it is ambiguous, and it is scoped to the
+    // answer body rather than to the citation snippet beside it.
     const answer = (await screen.findByText('Security Assistant')).closest('.bubble') as HTMLElement
     const body = answer.querySelector('.bubble__body') as HTMLElement
     expect(body).not.toBeNull()
-    // In the answer body itself, not only in the citation snippet beside it.
-    expect(within(body).getAllByText(/at least 14 characters long/i).length).toBeGreaterThanOrEqual(1)
+    expect(within(body).getAllByText(/at least 14 characters long/i)).toHaveLength(1)
     expect(screen.getByRole('heading', { name: /recommended actions/i })).toBeInTheDocument()
     expect(screen.getByLabelText(/sources/i)).toBeInTheDocument()
     expect(screen.getByText('KB-001')).toBeInTheDocument()
@@ -416,11 +417,11 @@ describe('chat workspace', () => {
 
     await user.click(screen.getByRole('button', { name: /^Password question/ }))
 
-    // The phrase appears both in the answer body and in the source snippet, so the
-    // count is asserted rather than merely awaited - a vacuous assertion here once
-    // proved nothing at all.
+    // The phrase appears both in the answer body and in the citation snippet, so the
+    // exact count is asserted. `.length >= 1` on a `findAllBy*` result is decorative by
+    // construction - the query already threw if the count were zero.
     const rendered = await screen.findAllByText(/at least 14 characters long/i)
-    expect(rendered.length).toBeGreaterThanOrEqual(1)
+    expect(rendered).toHaveLength(2)
     expect(screen.getByText(/what are the company password requirements\?/i)).toBeInTheDocument()
   })
 
@@ -919,6 +920,25 @@ describe('creating a ticket from an answer', () => {
     expect(await clickCreateAndCaptureCategory('phishing', 'SEC-2026-0044')).toBe('security')
   })
 
+  it('routes a whole incident report to the security queue', async () => {
+    expect(await clickCreateAndCaptureCategory('security_incident', 'SEC-2026-0045')).toBe(
+      'security',
+    )
+  })
+
+  it('does not file a question into the security queue', async () => {
+    // The category decides the owning queue on the server, so the old catch-all
+    // (`everything that is not IT support is a security matter`) turned a press of this
+    // button on a policy answer into a security-owned ticket at medium severity. A
+    // question is not an incident: it goes to `other`, which the server routes to the
+    // raiser's own team at low severity.
+    expect(await clickCreateAndCaptureCategory('security_faq', 'IT-2026-0046')).toBe('other')
+  })
+
+  it('does not file a policy question into the security queue either', async () => {
+    expect(await clickCreateAndCaptureCategory('policy_question', 'IT-2026-0047')).toBe('other')
+  })
+
   it('reports a failure to raise without losing the answer', async () => {
     const user = await askAndGetAnswer({
       '/tickets': () =>
@@ -1148,7 +1168,7 @@ describe('backend availability', () => {
   })
 
   it('does not show the demo shortcuts when the backend disables them', async () => {
-    route({ '/meta': () => json({ ...meta, features: { demo_login: false, demo_users_seeded: false } }) })
+    route({ '/meta': () => json({ ...meta, features: { demo_login: false } }) })
     render(<App />)
 
     await screen.findByLabelText(/work email/i)

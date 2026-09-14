@@ -124,6 +124,17 @@ class GeneratedAnswer:
         return bool(self.context_findings)
 
 
+def _has_no_latin_script(text: str) -> bool:
+    """True when a message contains no Latin letters at all.
+
+    The knowledge base, the tokenizer and every classification rule are English-only,
+    and that is documented as a known limitation rather than hidden. Detecting "this was
+    never going to match" lets the answer say so instead of implying the knowledge base
+    has nothing on the subject.
+    """
+    return bool(text.strip()) and re.search(r"[A-Za-z]", text) is None
+
+
 def extract_actions(context: str, *, limit: int = MAX_ACTIONS) -> list[str]:
     """Pull actionable instructions out of the retrieved context.
 
@@ -248,7 +259,9 @@ class ResponseGenerator:
 
         if not retrieval.has_matches:
             return GeneratedAnswer(
-                answer=build_no_context_answer(role=role),
+                answer=build_no_context_answer(
+                    role=role, non_latin_question=_has_no_latin_script(question)
+                ),
                 recommended_actions=[],
                 source_documents=[],
                 cited_document_ids=[],

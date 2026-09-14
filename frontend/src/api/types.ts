@@ -58,8 +58,10 @@ export interface RetrievalInfo {
 }
 
 export interface AppFeatures {
+  /** Whether the sign-in screen should offer the demo accounts. The only flag the
+   * anonymous `/meta` publishes: `demo_users_seeded` was removed because no client
+   * read it and it answered "are seeded demo accounts live here?" to anyone. */
   demo_login: boolean
-  demo_users_seeded: boolean
 }
 
 export interface MetaResponse {
