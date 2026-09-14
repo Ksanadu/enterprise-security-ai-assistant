@@ -241,10 +241,15 @@ Seeded accounts (password from `DEMO_USER_PASSWORD`):
 
 | Email | Role | What it can see |
 | --- | --- | --- |
-| `employee@example.com` | employee | public FAQ + employee-facing policies |
-| `it@example.com` | it | + VPN/endpoint troubleshooting, IT SOPs |
-| `security@example.com` | security | everything, including incident-response SOPs |
-| `admin@example.com` | admin | dashboard access |
+| `employee@example.com` | employee | public FAQ + employee-facing policies (7 documents) |
+| `employee2@example.com` | employee | the same, and the second account exists so cross-employee ticket isolation can be demonstrated |
+| `it@example.com` | it | + VPN/endpoint troubleshooting, IT SOPs (10 documents) |
+| `security@example.com` | security | everything, including incident-response SOPs (12 documents), plus the dashboard |
+
+There is **no `admin` account and no `admin` role**: the role enum is `employee` / `it` /
+`security`, and the dashboard is gated on `security`. This table previously listed an
+`admin@example.com` that was never seeded — an audit of this document against the code found it, and
+`admin@example.com` returns 401.
 
 Log in as `security@example.com` to see the dashboard, and as `employee@example.com` to see the
 RBAC boundary do its job (ask about the malware SOP as the employee, then as security).

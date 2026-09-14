@@ -43,6 +43,7 @@ All ten phases are complete.
 
 | Document | Contents |
 | -------- | -------- |
+| [docs/PROJECT_SUMMARY.md](docs/PROJECT_SUMMARY.md) | The whole project in one document: every feature, every design decision with its reason and its trade-off, and an interviewer's question set (pre-sales / solutions framing) with short answers |
 | [docs/DEMO.md](docs/DEMO.md) | How to run the demo, a presenter's script, every scenario with its expected output, and acceptance-criteria traceability |
 | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | How the system is built and why: the pipeline, the authorization design, the data model, and the security model threat by threat |
 | [backend/knowledge_base/README.md](backend/knowledge_base/README.md) | The knowledge base document metadata contract |

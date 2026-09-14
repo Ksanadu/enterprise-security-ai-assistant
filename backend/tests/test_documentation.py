@@ -28,6 +28,7 @@ README = PROJECT_ROOT / "README.md"
 PROJECT_STATUS = PROJECT_ROOT / "PROJECT_STATUS.md"
 ARCHITECTURE = DOCS_DIR / "ARCHITECTURE.md"
 DEMO_DOC = DOCS_DIR / "DEMO.md"
+SUMMARY_DOC = DOCS_DIR / "PROJECT_SUMMARY.md"
 DEMO_SCRIPT = BACKEND_DIR / "scripts" / "demo.py"
 
 pytestmark = pytest.mark.security
@@ -129,7 +130,7 @@ class TestDocumentationExistsAndIsLinked:
     def test_the_documents_are_utf8_without_a_byte_order_mark(self) -> None:
         # A BOM breaks Markdown rendering on some viewers, and a PowerShell
         # round-trip is how it gets there.
-        for path in (README, ARCHITECTURE, DEMO_DOC):
+        for path in (README, ARCHITECTURE, DEMO_DOC, PROJECT_STATUS, SUMMARY_DOC):
             raw = path.read_bytes()
             assert not raw.startswith(b"\xef\xbb\xbf"), f"{path.name} starts with a BOM"
             raw.decode("utf-8")
@@ -140,7 +141,7 @@ class TestEveryReferencedFileExists:
 
     def test_no_documentation_references_a_missing_file(self) -> None:
         broken: list[str] = []
-        for path in (README, ARCHITECTURE, DEMO_DOC, PROJECT_STATUS):
+        for path in (README, ARCHITECTURE, DEMO_DOC, PROJECT_STATUS, SUMMARY_DOC):
             text = path.read_text(encoding="utf-8")
             for reference in sorted(_referenced_paths(text)):
                 if "*" in reference:
