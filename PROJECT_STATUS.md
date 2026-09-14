@@ -401,11 +401,65 @@ as a body of ≥200 characters rather than as a front-matter key: documented in 
 **All ten planned rounds are done** (R1–R10). The verification pass that produced them, and the
 decisions behind each round, are in the decision log above.
 
+**Round 11 — the Docker path became one command — DONE**
+
+The one remaining unproven acceptance criterion was §9.10 (`docker compose up` starts the whole
+system). Docker is still not installed on this machine, so the criterion is still unproven *by
+execution* — but reading the compose file against the documented command found a defect that
+guaranteed the command could never have worked on a fresh clone, and that is fixed here.
+
+- [x] **The documented one-liner could not work, and the prerequisite was hiding it.** The compose
+      file declared `env_file: - .env` for the backend; Compose treats a missing `env_file` as a
+      fatal error; `.env` is gitignored, so a fresh clone has none. Every instruction in the
+      repository therefore put `Copy-Item .env.example .env` first, which made the missing file
+      invisible — and the test that would have caught it skips on a machine without Docker, which
+      is every machine this project was developed on. `env_file` is now
+      `- path: .env / required: false` (Compose 2.24+), so the file is *read when it exists* and
+      the stack starts without it.
+- [x] **`docker compose up --build` now needs no configuration file at all.** The compose file
+      carries a working default for every value the application needs: the four container paths, the
+      bind address, the proxy hop count, and a CORS origin **derived from `ESAA_HTTP_PORT`** rather
+      than written out (so `ESAA_HTTP_PORT=9090` cannot produce a page that is blocked from calling
+      its own API). With no `.env`, the app generates its own per-process signing key, which is the
+      already-documented and already-safe default outside production.
+- [x] **`scripts/docker-up.ps1` and `scripts/docker-up.sh`** — one command that also does the two
+      things a bare `up` cannot: write a **stable** `AUTH_SECRET_KEY` into `.env` (so sessions
+      survive `docker compose restart`; the generated per-process key does not), and wait until the
+      stack **actually answers** — probing `/api/v1/health` *through nginx*, the path the browser
+      takes — before reporting success. A container that has already exited stops the wait and is
+      named, rather than being discovered as a timeout. `-Rebuild`, `-Logs`, `-Down`,
+      `-FrontendPort` (and the `--` equivalents) round it out.
+- [x] **Tests for all of it** (`test_deployment_assets.py`, +30): every `env_file` entry must be
+      optional; `docker compose config` is run in an empty directory with **no `.env` and every
+      `ESAA_*` dropped** (the fresh-clone case, which is where the old file failed); every variable
+      the compose file sets must exist on the settings model; the CORS origin must follow the
+      published port; and both launchers are executed against a **copy of the repository** with a
+      fake `docker` on `PATH` — prerequisites, `.env` bootstrap, the secret's shape (base64 for
+      PowerShell, hex for the shell, neither containing `$`), the refusal of an existing key, and
+      the refusal to start an `APP_ENV=production` stack.
+- [x] **The tests' own first version was wrong, and it is recorded rather than quietly fixed.**
+      They ran the real launcher against the real checkout, so `.env` resolved to the *developer's*
+      `.env` — which already had a key — and the "generated a secret" assertion passed without the
+      script generating anything. Both launcher tests now build a clone-shaped directory in
+      `tmp_path`. A test that reads the developer's own state is the same class of mistake as the
+      unrun Docker path: it reports success about something it never did.
+- [x] Documented: `README.md` (quick start + deployment + the verification table),
+      `PROJECT_HANDOFF.md` §3/§9.1/§9.2/§12, and `.env.example` gained the four `ESAA_*` Docker
+      variables.
+
+**Round 11 measured:** backend 1590 collected (1583 passed, 7 skipped), 1214 security-marked
+(was 1182), coverage floor 90 enforced; frontend 62 passed with thresholds met. Of the skips, 1 is
+the Docker CLI and 5 are the POSIX shell, so `docker compose up` itself remains unproven by
+execution and is reported that way in every document that mentions it.
+
 ## What remains
 
 Not defects in the code - the confirmed defect list is empty - but the honest limits:
 - [ ] **Acceptance criterion §9.10 is the only unproven one**: `docker compose up` has never run
-      (no container runtime on the development machine). Everything else is verified by execution.
+      (no container runtime on the development machine). R11 removed the reason the documented
+      command could never have worked — the missing-`.env` prerequisite — and added a one-command
+      launcher and 30 tests, but *executing* it still requires a machine with Docker. Everything
+      else is verified by execution.
 - [ ] Answer quality against a real provider is unmeasured (the *request path* is now tested; the
       prose is not). `LLM_PROVIDER=openai_compatible` switches it.
 - [ ] P2/P3 improvements from the review, none of them repaired here because they are not defects:
@@ -437,11 +491,11 @@ every round, in the same commit as the change it describes.
 | Gate | Result |
 | --- | --- |
 | `scripts/check.ps1` (ruff, mypy, pytest+cov, tsc, eslint, vitest+cov, secret scan) | **exit 0** |
-| Backend `pytest -q` | **1557 passed, 1 skipped** of **1558 collected** (started at 1415/1) |
+| Backend `pytest -q` | **1583 passed, 7 skipped** of **1590 collected** (was 1558; R11 added 32 deployment/launcher tests, and the 6 extra skips are its tool-dependent ones) |
 | Backend coverage `--cov=app` | **95%** (4308 statements, 215 missed), floor 90 enforced; `app/main.py` measured (93%); `app/ai/llm.py` 84% → 98% |
 | Frontend `npm test` | **62 passed** (2 files) |
 | Frontend coverage | **91.39% statements / 80.6% branches / 74.44% functions**, thresholds 85 / 75 / 70 enforced |
-| `security`-marked tests | **1182** of 1558 collected (was 1067 of 1416 before the stabilization pass) |
+| `security`-marked tests | **1214** of 1590 collected (was 1182 of 1558 before R11) |
 | CI | `.github/workflows/ci.yml` runs the whole gate on push to `main` and on pull requests. Green on every round since the workflow was fixed: `c1c63a4` (R7), `fb8accc` (R8), `bc4d09a` (R9), `c944644` (R10), `2cd3f4a`, plus `c3da181` and `7e74377` before them |
 | `backend/scripts/demo.py` | **71 / 71 checks passed** (was 67; SCENARIO 0 now demonstrates the disclosure boundary and the search limiter) |
 | Disclosure boundary (live) | anonymous `/meta` carries no AI-stack key and no `demo_users_seeded`; anonymous `/chat/capabilities` is 401; rule counts absent for employee, present for security |
@@ -472,9 +526,12 @@ tests without updating this file now fails with the new number in the message.
 UTF-8 as ANSI and writes a BOM, which mangles every non-ASCII character (the handoff warns about
 this in §11.6; it cost one `git checkout --` to undo). Use the editor or an explicit UTF-8 API.
 
-The single skip is `tests/test_deployment_assets.py:436` — the Docker CLI is absent on this
-machine, so acceptance criterion §9.10 (`docker compose up`) remains **unproven**, exactly as the
-handoff states.
+The skips are all tool-dependent and each names its reason: **1** for the Docker CLI
+(`test_deployment_assets.py` — acceptance criterion §9.10 `docker compose up` remains **unproven by
+execution**) and **5** for the POSIX shell, which R11's shell-launcher tests skip on a machine
+without `sh`. R11 made the documented command work from a fresh clone and covered it with tests that
+do run here; executing the stack itself is still the one thing a machine without a container runtime
+cannot do.
 
 ## Current Branch
 
@@ -482,9 +539,11 @@ handoff states.
 
 ## Last Verified
 
-2026-09-13 — verification pass plus rounds R7–R10, all green locally and on the runner
-(`scripts/check.ps1` exit 0; backend 1551 passed / 1 skipped / 95% with the floor enforced;
+2026-09-13 — stabilization rounds R7–R10, all green locally and on the runner. R11 (the
+one-command Docker path) is verified locally against the same gate; `docker compose up` itself
+remains unexecuted here for want of a container runtime.
+(`scripts/check.ps1` exit 0; backend 1583 passed / 7 skipped / 95% with the floor enforced;
 frontend 62 passed with thresholds met; demo 71/71; evaluation set 40/40 with 28/28 expected
-documents; CI green on `c1c63a4`, `fb8accc`, `bc4d09a`, `c944644`).
-Local environment: Windows PowerShell 5.1, Python 3.12.10, Node 24.19.0.
+documents; CI green on `c1c63a4`, `fb8accc`, `bc4d09a`, `c944644`.)
+Local environment: Windows PowerShell 5.1, Python 3.12.10, Node 24.19.0, no Docker.
 (`pwsh` is not installed on this machine; use `powershell -ExecutionPolicy Bypass -File scripts\check.ps1`.)

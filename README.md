@@ -386,9 +386,9 @@ field nobody reads is not an answer.
   dashboard, triage it, and check the audit trail - all through HTTP.
 * **Cross-role consistency**: the same question asked by all three roles must produce an
   identical classification and identical escalation, while retrieval differs and stays in scope.
-* **1067 security-marked tests** covering RBAC, injection, leakage, session handling, ticket
+* **1214 security-marked tests** covering RBAC, injection, leakage, session handling, ticket
   scoping, redaction and the deployment assets, runnable as one suite with `pytest -m security`.
-* 1558 backend tests, **95% statement coverage** (the coverage floor is enforced by the gate);
+* 1590 backend tests, **95% statement coverage** (the coverage floor is enforced by the gate);
   `ruff`, `mypy`, `tsc` and `eslint` clean. The phase this section describes closed with a smaller
   suite; the figure above is the current one, and the four places in this README that state it are
   asserted to agree by `tests/test_documentation.py`.
@@ -414,6 +414,11 @@ The set immediately earned its keep. Writing it exposed a set of real defects:
 * `docker compose up --build` brings up the backend, the nginx frontend, and a named volume holding
   the SQLite database and the FAISS index. The frontend waits for a **passing backend healthcheck**
   before it starts.
+* The command needs no configuration file: the compose file carries a working default for every
+  value the application needs, declares its `env_file` as optional so a gitignored `.env` cannot
+  stop a fresh clone from starting, and lets the app generate its own signing key when none is
+  supplied. `scripts/docker-up.ps1` and `scripts/docker-up.sh` add the two things a bare `up`
+  cannot - a stable key written into `.env`, and a readiness check through nginx.
 * The browser talks to one origin only. nginx serves the SPA, applies the SPA history fallback and
   reverse-proxies `/api` to the backend, so **the production request path has no CORS at all**.
 * `AUTH_SECRET_KEY`, `LLM_API_KEY` and friends are read from `.env` at run time and are deliberately
@@ -550,7 +555,7 @@ stale cached index). A mismatch is logged as a security event and the chunk is d
 │   ├── scripts/
 │   │   ├── demo.py               # the executable demonstration (71 checks)
 │   │   └── update_evaluation_expectations.py
-│   ├── tests/                    # 1558 tests
+│   ├── tests/                    # 1590 tests
 │   └── requirements*.txt
 ├── frontend/
 │   ├── Dockerfile                # Vite build stage → nginx runtime stage
@@ -566,7 +571,10 @@ stale cached index). A mismatch is logged as a security event and the chunk is d
 └── scripts/
     ├── check.ps1                 # every quality gate
     ├── check-no-secrets.ps1      # repository hygiene
-    └── run-local.ps1             # run both halves without Docker (+ -Check smoke test)
+    ├── docker-up.ps1             # start the Docker stack in one command (+ wait, report)
+    ├── docker-up.sh              # the same, for Linux/macOS
+    ├── run-local.ps1             # run both halves without Docker (+ -Check smoke test)
+    └── verify-container-image.ps1  # reproduce the backend image layout without a runtime
 ```
 
 ---
@@ -586,6 +594,20 @@ The application runs without Docker. Docker is needed only for the container pat
 ---
 
 ## Quick start
+
+### 0. Docker (one command, nothing to configure first)
+
+```powershell
+docker compose up --build          # then open http://localhost:8080
+```
+
+A fresh clone needs no `.env` and no setup step: the compose file carries a working default for
+everything the stack needs, and the app generates its own signing key when none is supplied. Use
+`pwsh -File scripts/docker-up.ps1` (or `sh scripts/docker-up.sh`) for a guided start that writes a
+*stable* key and waits until the stack actually answers. See [Deployment](#deployment) for the
+details and the honest note about what has not been verified.
+
+The rest of this section is the non-Docker path, for development.
 
 ### 1. Backend
 
@@ -708,13 +730,33 @@ built SPA and reverse-proxies `/api` to the backend over the compose network.
 
 ### Run it
 
-```powershell
-Copy-Item .env.example .env          # bash: cp .env.example .env
-# then set a real AUTH_SECRET_KEY (see the production checklist below)
-python -c "import secrets; print(secrets.token_urlsafe(48))"
+One command, from a fresh clone, with no file to create first:
 
+```powershell
 docker compose up --build
 ```
+
+`docker-compose.yml` needs no configuration file. Every value the stack requires is either set in
+the compose file itself or defaulted by the application, `.env` is read *when it exists*, and the
+app mints a random signing key when none is supplied - so this command works on a clone that has
+nothing but the tracked files.
+
+For a guided start that also does the two things a bare `up` cannot:
+
+```powershell
+pwsh -File scripts/docker-up.ps1          # Windows / PowerShell
+sh scripts/docker-up.sh                   # Linux / macOS
+```
+
+1. It creates `.env` from the committed template on first use and writes a **stable
+   `AUTH_SECRET_KEY`** into it, so sessions survive `docker compose restart`. With the generated
+   random key they do not.
+2. It waits until the stack **actually answers** - probing `/api/v1/health` *through nginx*, which
+   is the path the browser takes - before telling you it is up, and reports which container
+   stopped if one does.
+
+It prints the URL, the demo accounts and the stop commands. Useful flags: `-Rebuild`, `-Logs`,
+`-Down`, `-FrontendPort 9090` (or `--rebuild`, `--logs`, `--down`, `--port 9090`).
 
 | URL | What |
 | --- | ---- |
@@ -723,8 +765,8 @@ docker compose up --build
 | <http://localhost:8000/docs> | interactive API docs |
 
 Override the published port with `ESAA_HTTP_PORT`; the backend's loopback port with
-`ESAA_API_PORT`. Remove the backend's `ports:` mapping entirely and the API is reachable *only*
-through the nginx proxy.
+`ESAA_API_PORT`. Both are documented in `.env.example`. Remove the backend's `ports:` mapping
+entirely and the API is reachable *only* through the nginx proxy.
 
 ```powershell
 docker compose down            # stop, keep the volume (database + index survive)
@@ -732,6 +774,9 @@ docker compose down -v         # stop and delete the data volume
 docker compose logs -f backend
 docker compose exec backend python -c "import app.main"   # sanity check inside the image
 ```
+
+The stack publishes on loopback and seeds demo accounts, so it is a demo deployment: read the
+production checklist below before exposing it to a network.
 
 ### Production checklist
 
@@ -784,7 +829,7 @@ the file-level checks cannot: the image's contents and its entrypoint work.
 ### What was and was not verified
 
 Docker is not installed in the environment this project was developed in, so **`docker compose up`
-was not executed here**. Rather than claim otherwise, the deployment is verified by 80 tests in
+was not executed here**. Rather than claim otherwise, the deployment is verified by the tests in
 `backend/tests/test_deployment_assets.py` that parse the real files and cross-check them against
 each other and against the application's own settings model - the failures that otherwise first
 appear on someone else's machine:
@@ -801,9 +846,23 @@ appear on someone else's machine:
 | `TRUSTED_PROXY_COUNT` equals the hop count, and nginx forwards the client address | Every request is attributed to nginx: the per-address lockout becomes one shared bucket and audit rows lose the real client |
 | `.dockerignore` excludes `.env`, `data/`, `node_modules/` | A secret or a database file gets baked into a shipped layer |
 | Neither container runs as root | |
+| Every `env_file` entry is **optional**, and every value the stack needs is set in the compose file | Compose treats a missing `env_file` as fatal, and `.env` is gitignored: the documented one-liner would fail before it built anything |
+| Each launcher parses, reports a missing Docker clearly, and generates a signing key into a copy of the repository | The first thing a reader without Docker runs is the launcher |
 
-One of those tests shells out to `docker compose config` and **skips with an explicit reason** when
-the Docker CLI is absent, so it starts validating automatically on a machine that has it.
+Two of those shell out to the real tools - `docker compose config`, and, when a POSIX shell is
+present, `sh -n` on the launcher. Both **skip with an explicit reason** when the tool is absent, so
+they start validating automatically on a machine that has it.
+
+The fresh-clone case has its own test: `test_compose_config_is_valid_with_no_env_file_at_all` copies
+the compose file into an empty directory, drops every `ESAA_*` variable, and runs `docker compose
+config` with no `.env` and no shell file. Before `required: false` was added to the `env_file` entry,
+Compose aborted there with *"env file ... not found"* - which is why the documented one-liner could
+never have worked on a fresh clone, and why the project's own instructions asked for a `.env` first.
+
+**One thing here did change as a result of writing those tests.** They found that the documented
+`Copy-Item .env.example .env` prerequisite was not *documentation slack* but load-bearing: Compose
+refuses to start when a declared `env_file` is missing, so the compose file could not start without
+a file that is gitignored. The prerequisite is now a convenience rather than a requirement.
 
 What *was* executed here:
 
@@ -900,12 +959,12 @@ The suite has three layers:
 
 | Layer | What it covers | How to run |
 | ----- | -------------- | ---------- |
-| Unit and integration (1558 tests) | Every module: config guards, ORM, RAG, classifiers, services, API, deployment assets | `pytest -q` |
+| Unit and integration (1590 tests) | Every module: config guards, ORM, RAG, classifiers, services, API, deployment assets | `pytest -q` |
 | Security (1067 tests) | RBAC, injection, leakage, sessions, ticket scoping, redaction, deployment hardening | `pytest -m security` |
 | Evaluation (61 tests) | The 40-question set and the end-to-end demo walkthrough | `pytest -m evaluation` |
 
 ```powershell
-# backend: 1558 tests, 95% statement coverage (floor 90)
+# backend: 1590 tests, 95% statement coverage (floor 90)
 cd backend
 .\.venv\Scripts\python.exe -m pytest -q
 .\.venv\Scripts\python.exe -m pytest -m security -q          # security subset
@@ -1186,7 +1245,7 @@ what?".
 | Rate limiting and lockout state are **per process**. The deployment runs a single uvicorn worker, so this is correct as shipped; running several workers or replicas would need a shared store (Redis) before the limits mean anything. | not scheduled |
 | The offline embedder is lexical, not semantic | configurable now |
 | No migration tool: schema changes rebuild the affected tables in development | acceptable pre-release |
-| `docker compose up` was **not executed** in the development environment (no container runtime available); the stack is verified statically and by the equivalent non-Docker path instead | verify on a machine with Docker |
+| `docker compose up` was **not executed** in the development environment (no container runtime available); the compose file is verified structurally, by `docker compose config` where a CLI exists, and by the equivalent non-Docker path | verify on a machine with Docker |
 | The frontend image's nginx master process starts as root, because binding port 80 requires it. Workers drop to `nginx`; use an unprivileged base image or a high port to avoid root entirely. | optional hardening |
 | `read_only: true` for the backend root filesystem is written but commented out in `docker-compose.yml`, since it could not be verified here | optional hardening |
 | The deployment is single-host with no TLS termination. Put a TLS-terminating proxy in front, and only then set `Secure` cookies or HSTS. | deployment concern |
@@ -1210,6 +1269,8 @@ what?".
 
 **All ten phases of `PRODUCT_SPEC.md` are complete.** The 13 acceptance criteria in section 9 are
 mapped to their evidence in [docs/DEMO.md § Acceptance criteria traceability](docs/DEMO.md#5-acceptance-criteria-traceability).
-The one criterion not verified in this environment is #10 (`docker compose up`), because no
-container runtime was available; that is recorded in the limitations table above rather than
-presented as verified.
+Criterion #10 (`docker compose up`) is implemented and reachable in one command from a fresh clone,
+and the compose file's contents, paths, secrets handling and launcher behaviour are covered by
+tests - but it has still never been *executed* here, because no container runtime is available in
+this environment. That gap is recorded in the limitations table above rather than presented as
+verified, and running `docker compose up --build` once on a machine with Docker is what closes it.

@@ -1,10 +1,18 @@
 # =============================================================================
 # Enterprise Security AI Assistant - single-host deployment
 # -----------------------------------------------------------------------------
-#     Copy-Item .env.example .env      (PowerShell)
+# One command, from a fresh clone, with no file to create first:
+#
 #     docker compose up --build
 #
-# Then open http://localhost:8080
+# Then open http://localhost:8080 and sign in as employee@example.com with the
+# password from DEMO_USER_PASSWORD (Demo@12345 by default).
+#
+# For a guided start that also mints a stable AUTH_SECRET_KEY and waits until the
+# stack actually answers before telling you it is up:
+#
+#     pwsh -File scripts/docker-up.ps1        # Windows / PowerShell
+#     sh scripts/docker-up.sh                 # Linux / macOS
 #
 # Two services:
 #   backend   FastAPI + SQLite + FAISS, not published to the network by default
@@ -14,7 +22,18 @@
 # path has no CORS at all. The backend port is mapped to loopback so the API can
 # still be exercised directly with curl during verification.
 #
+# There is deliberately no *required* configuration file. `.env` is read when it
+# exists, so an operator can tune anything without editing this file, but every
+# value this stack needs has a working default here and in the application, and
+# the app itself generates a random signing key when none is supplied. That is
+# what makes the one command above work on a fresh clone; see the "Configuration"
+# block below for what changes when you do provide a `.env`.
+#
 # All data is simulated. No real enterprise data is shipped in this repository.
+#
+# This configuration is a demo/prototype deployment over loopback. Read the
+# README's production checklist before exposing it to a network: it is not
+# production-hardened, and it says so on purpose.
 # =============================================================================
 
 name: esaa
@@ -25,14 +44,27 @@ services:
       context: ./backend
     image: esaa-backend:local
 
-    # All application configuration comes from the environment file. It is read
-    # at run time and never baked into an image layer.
+    # Operator configuration, applied when the file exists.
+    #
+    # `required: false` is load-bearing: Compose treats a missing `env_file` as a
+    # fatal error, and `.env` is gitignored, so a fresh clone has none. Without
+    # this the documented one-liner failed before it built anything - the one
+    # environment able to validate the compose file (a machine with Docker) had
+    # nothing to validate it against. Requires Compose 2.24+; `docker-up.ps1` /
+    # `docker-up.sh` create the file from the committed template first, which
+    # keeps older Compose versions working too.
     env_file:
-      - .env
+      - path: .env
+        required: false
 
     # Container-specific overrides. The knowledge base is immutable and lives in
     # the image; the database and the vector index live on the named volume so
     # they survive `docker compose up --build`.
+    #
+    # These are *overrides*: they win over `.env`, because the values a `.env`
+    # written for the non-container local run carries are wrong in here (relative
+    # paths that would resolve inside the image layer, and the Vite dev-server
+    # origin, which is not the origin this stack serves).
     environment:
       # Four slashes: "sqlite://" + absolute path /app/data/app.db
       DATABASE_URL: sqlite:////app/data/app.db
@@ -41,9 +73,11 @@ services:
       # The in-container API listens on all interfaces of its own namespace; it
       # is unreachable from outside except through the loopback mapping below.
       API_HOST: 0.0.0.0
-      # Direct browser access to the backend is only needed for local debugging
-      # on the mapped port, hence the loopback origins rather than a wildcard.
-      API_CORS_ORIGINS: ${ESAA_CORS_ORIGINS:-http://localhost:8080,http://127.0.0.1:8080,http://localhost:8000,http://127.0.0.1:8000}
+      # Derived from ESAA_HTTP_PORT rather than hardcoded, so overriding the
+      # published port cannot leave the browser blocked by a stale origin. The
+      # loopback origins cover the backend's own mapped port, which is only there
+      # for local debugging.
+      API_CORS_ORIGINS: ${ESAA_CORS_ORIGINS:-http://localhost:${ESAA_HTTP_PORT:-8080},http://127.0.0.1:${ESAA_HTTP_PORT:-8080},http://localhost:${ESAA_API_PORT:-8000},http://127.0.0.1:${ESAA_API_PORT:-8000}}
       # Exactly one proxy sits in front of the API (the nginx service below), so
       # the real client address is the last entry of X-Forwarded-For.
       #
@@ -73,10 +107,20 @@ services:
       timeout: 5s
       retries: 3
       # The knowledge base is loaded and the vector index is fitted at start-up,
-      # which is not instantaneous.
-      start_period: 40s
+      # which is not instantaneous: the first run fits a TF-IDF vocabulary over
+      # 12 documents before it will answer.
+      start_period: 60s
 
     restart: unless-stopped
+
+    # uvicorn becomes pid 1 unless something else does; a tiny init reaps the
+    # children the RAG stack can leave behind and forwards signals, so
+    # `docker compose stop` is not a 10-second timeout.
+    init: true
+
+    # uvicorn's own graceful shutdown closes the SQLite connection; cutting it
+    # off mid-write is how a demo database gets left with a journal file.
+    stop_grace_period: 15s
 
     # A compromised process cannot gain privileges it did not already have.
     security_opt:
@@ -111,6 +155,8 @@ services:
       start_period: 10s
 
     restart: unless-stopped
+
+    init: true
 
     security_opt:
       - no-new-privileges:true

@@ -23,6 +23,7 @@ a container runtime, and nothing touches the network.
 
 from __future__ import annotations
 
+import os
 import re
 import shutil
 import subprocess
@@ -42,6 +43,8 @@ FRONTEND_DOCKERFILE = FRONTEND_DIR / "Dockerfile"
 NGINX_CONF = FRONTEND_DIR / "nginx.conf"
 BACKEND_DOCKERIGNORE = BACKEND_DIR / ".dockerignore"
 FRONTEND_DOCKERIGNORE = FRONTEND_DIR / ".dockerignore"
+UP_SCRIPT_PS1 = PROJECT_ROOT / "scripts" / "docker-up.ps1"
+UP_SCRIPT_SH = PROJECT_ROOT / "scripts" / "docker-up.sh"
 
 pytestmark = pytest.mark.security
 
@@ -179,6 +182,22 @@ def _dockerignore_rules(path: Path) -> set[str]:
             continue
         rules.add(line)
     return rules
+
+
+def _env_file_entries(service: dict[str, Any]) -> list[tuple[str, bool]]:
+    """``(path, required)`` for every ``env_file`` entry, in either syntax.
+
+    A plain string means the file must exist: Compose treats a missing one as a
+    fatal error, which is what made the documented one-liner fail on a fresh
+    clone. The long syntax carries the same information explicitly.
+    """
+    entries: list[tuple[str, bool]] = []
+    for entry in service.get("env_file") or []:
+        if isinstance(entry, dict):
+            entries.append((str(entry.get("path")), bool(entry.get("required", True))))
+        else:
+            entries.append((str(entry), True))
+    return entries
 
 
 def _csp_directives(policy: str) -> set[str]:
@@ -399,7 +418,28 @@ class TestComposeSecrets:
     )
 
     def test_configuration_comes_from_the_env_file(self, services: dict[str, Any]) -> None:
-        assert services["backend"]["env_file"] == [".env"]
+        entries = _env_file_entries(services["backend"])
+        assert [path for path, _ in entries] == [".env"]
+
+    def test_the_env_file_is_optional_so_a_fresh_clone_can_start(
+        self, services: dict[str, Any]
+    ) -> None:
+        """The one-command path must not depend on a file that cannot be committed.
+
+        `.env` is gitignored, so a fresh clone has none - and Compose treats a
+        missing `env_file` as a fatal error. Declared as a plain string, the
+        documented `docker compose up --build` therefore failed *before it built
+        anything*, and the only environment able to validate the compose file (a
+        machine with Docker) was the one environment with nothing to validate it
+        against. `required: false` is what makes the command work as written.
+        """
+        entries = _env_file_entries(services["backend"])
+        assert entries, "the backend reads no environment file at all"
+        optional = [path for path, required in entries if not required]
+        assert optional == [".env"], (
+            "every env_file entry must be optional, or a fresh clone cannot start: "
+            f"{entries}"
+        )
 
     @pytest.mark.parametrize("key", FORBIDDEN_KEYS)
     def test_secrets_are_not_inlined(self, services: dict[str, Any], key: str) -> None:
@@ -490,6 +530,694 @@ class TestComposeSemantics:
                 env_file.unlink(missing_ok=True)
 
         assert completed.returncode == 0, completed.stderr
+
+    def test_compose_config_is_valid_with_no_env_file_at_all(self, tmp_path: Path) -> None:
+        """With no `.env` and no shell variables: the fresh-clone case.
+
+        The other direction from the test above. That one proves the file is valid
+        for an operator who has an `.env`; this one proves it is valid for the
+        operator the one-liner is written for, who has neither an `.env` nor any
+        `ESAA_*` exported. Without `required: false` Compose aborts here with
+        "env file ... not found", before it builds anything.
+
+        The project root is copied in without `.env`, and any `ESAA_*` in this
+        process's environment is dropped, so "someone's machine happens to have it
+        set" cannot make this pass.
+        """
+        docker = shutil.which("docker")
+        if docker is None:
+            pytest.skip("docker CLI is not installed in this environment")
+
+        probe = subprocess.run(  # noqa: S603
+            [docker, "compose", "version"],
+            capture_output=True,
+            text=True,
+            timeout=120,
+            check=False,
+        )
+        if probe.returncode != 0:
+            pytest.skip(
+                "the docker compose plugin is not usable here: "
+                f"{(probe.stderr or probe.stdout).strip()[:200]}"
+            )
+
+        shutil.copyfile(COMPOSE_FILE, tmp_path / "docker-compose.yml")
+        assert not (tmp_path / ".env").exists()
+
+        environment = {
+            key: value for key, value in os.environ.items() if not key.startswith("ESAA_")
+        }
+        completed = subprocess.run(  # noqa: S603
+            [
+                docker,
+                "compose",
+                "-f",
+                str(tmp_path / "docker-compose.yml"),
+                "config",
+                "--quiet",
+            ],
+            capture_output=True,
+            text=True,
+            timeout=120,
+            check=False,
+            cwd=str(tmp_path),
+            env=environment,
+        )
+        assert completed.returncode == 0, (
+            "a fresh clone with no .env cannot start:\n"
+            f"{completed.stderr or completed.stdout}"
+        )
+
+
+# ---------------------------------------------------------------------------
+# The one-command path
+# ---------------------------------------------------------------------------
+
+
+class TestTheStackStartsWithNoConfigurationFile:
+    """`docker compose up --build` must work on a fresh clone, with nothing else.
+
+    Acceptance criterion §9.10 is *"Docker Compose can start the whole system"*,
+    and until this change the evidence for it was static analysis plus a skipped
+    test, because the documented command could not have worked on a fresh clone:
+    `.env` is gitignored and Compose treats a missing `env_file` as fatal. The
+    documentation was honest about that ("Copy-Item .env.example .env" came
+    first), which is exactly why nobody noticed that the prerequisite was doing
+    the work the compose file should have done itself.
+
+    These tests assert the compose file carries a working default for everything
+    the application needs, so the prerequisite is a convenience rather than a
+    requirement. They are static, plus the real settings model - no container
+    runtime is needed.
+    """
+
+    @pytest.fixture(scope="class")
+    def environment(self, services: dict[str, Any]) -> dict[str, str]:
+        return services["backend"]["environment"]
+
+    def test_configuration_comes_from_the_environment_not_the_image(
+        self, environment: dict[str, str]
+    ) -> None:
+        """A build ARG would bake it into a layer; a run-time override does not.
+
+        Every value a container needs in order to behave must be in the service's
+        `environment` block. The rest of this class depends on that: it reads the
+        container's configuration from here, so a value that only exists as a
+        Dockerfile `ENV` would be invisible to it - and to an operator overriding it.
+        """
+        from app.core.config import Settings
+
+        for key in (
+            "DATABASE_URL",
+            "VECTOR_STORE_PATH",
+            "KB_DIR",
+            "API_HOST",
+            "API_CORS_ORIGINS",
+            "TRUSTED_PROXY_COUNT",
+        ):
+            assert key in environment, f"{key} is not set for the container"
+
+        # The application recognises every one of them. A compose file that sets a
+        # name the settings model ignores is a silent no-op.
+        recognised = set(Settings.model_fields)
+        for key in environment:
+            assert key.lower() in recognised, (
+                f"docker-compose.yml sets {key}, which Settings does not define - "
+                "the value would be ignored"
+            )
+
+    def test_every_container_path_is_absolute_and_inside_the_image_layout(
+        self, environment: dict[str, str], services: dict[str, Any]
+    ) -> None:
+        """Set the same way a `.env` would, but with the answers a container needs.
+
+        The application's own defaults are relative (`./data/app.db`,
+        `./knowledge_base`), resolved against the backend package directory. Inside
+        the image that would write the database into the layer, where the next
+        rebuild discards it.
+        """
+        for key in ("DATABASE_URL", "VECTOR_STORE_PATH", "KB_DIR"):
+            value = environment[key]
+            stripped = value[len("sqlite://") :] if key == "DATABASE_URL" else value
+            assert _container_path(stripped).is_absolute(), f"{key} is not absolute: {value}"
+
+        destinations = _copy_destinations(_stage_instructions(BACKEND_DOCKERFILE, 1))
+        assert _container_path(environment["KB_DIR"]) in destinations
+
+        targets = [target for _, target in _volume_mounts(services["backend"])]
+        database = _container_path(environment["DATABASE_URL"][len("sqlite://") :])
+        assert any(target in database.parents for target in targets), (
+            f"{database} is not covered by a mounted volume: {targets}"
+        )
+
+    def test_the_cors_origin_follows_the_published_port(
+        self, environment: dict[str, str], services: dict[str, Any]
+    ) -> None:
+        """Otherwise `-FrontendPort 9090` starts a page that cannot call its own API.
+
+        The published port is interpolated from `ESAA_HTTP_PORT`, so the CORS
+        origin has to be derived from the same variable rather than written out.
+        """
+        origins = environment["API_CORS_ORIGINS"]
+        assert "${ESAA_HTTP_PORT" in origins, (
+            "the CORS origin is hardcoded, so it disagrees with any other published "
+            f"port: {origins}"
+        )
+        assert "${ESAA_HTTP_PORT" in str(services["frontend"]["ports"][0])
+
+    def test_the_backend_does_not_require_a_secret_to_start(
+        self, environment: dict[str, str]
+    ) -> None:
+        """With no `.env`, the app generates a random per-process signing key.
+
+        That is the documented default for a machine with no configuration, and it
+        is safe: the app refuses to run with the placeholder outside development.
+        """
+        from app.core.config import INSECURE_DEV_SECRET, Settings
+
+        assert "AUTH_SECRET_KEY" not in environment
+
+        shipped = Settings(
+            _env_file=None,
+            app_env="development",
+            api_cors_origins=environment["API_CORS_ORIGINS"],
+            trusted_proxy_count=int(environment["TRUSTED_PROXY_COUNT"]),
+        )
+        assert shipped.auth_secret_key not in {"", INSECURE_DEV_SECRET}
+        assert shipped.auth_secret_ephemeral is True
+        # The demo accounts are what make the stack demonstrable straight away.
+        assert shipped.demo_login_enabled is True
+
+    def test_every_documented_demo_account_can_log_in_with_the_default_password(
+        self, environment: dict[str, str]
+    ) -> None:
+        """A stack that starts but cannot be signed into is not a working demo."""
+        from app.core.config import DEFAULT_DEMO_PASSWORD, Settings
+
+        shipped = Settings(
+            _env_file=None,
+            app_env="development",
+            api_cors_origins=environment["API_CORS_ORIGINS"],
+        )
+        assert shipped.demo_user_password == DEFAULT_DEMO_PASSWORD
+        assert shipped.seed_demo_users is True
+
+
+class TestOneCommandLauncher:
+    """`scripts/docker-up.ps1` and `scripts/docker-up.sh` do the same six steps.
+
+    Neither can be executed here: this machine has no container runtime and no
+    `pwsh`. What *can* be executed without one is everything up to the point a
+    daemon is needed - argument parsing, the prerequisites check, and the `.env`
+    bootstrap - and that is what the tests below do, by putting a fake `docker` on
+    `PATH`. The remaining steps are asserted structurally, on both scripts, so a
+    fix applied to one and forgotten in the other fails.
+
+    Each test runs the launcher against a **copy of the repository** in `tmp_path`
+    rather than against the checkout. The script resolves `.env` relative to its
+    own location - which is right, and means a test that ran the real script would
+    read and overwrite the developer's own `.env`. That is not a hypothetical: the
+    first version of these tests passed for exactly that reason, reporting that the
+    secret had been generated when it had in fact found a real one already there.
+    """
+
+    @pytest.fixture(scope="class")
+    def ps1(self) -> str:
+        assert UP_SCRIPT_PS1.is_file(), f"missing {UP_SCRIPT_PS1}"
+        return UP_SCRIPT_PS1.read_text(encoding="utf-8")
+
+    @pytest.fixture(scope="class")
+    def sh(self) -> str:
+        assert UP_SCRIPT_SH.is_file(), f"missing {UP_SCRIPT_SH}"
+        return UP_SCRIPT_SH.read_text(encoding="utf-8")
+
+    @pytest.fixture
+    def fake_repo(self, tmp_path: Path) -> Path:
+        """A clone-shaped directory: the scripts, the compose file and the template.
+
+        Nothing invented: these are the files a fresh clone has.
+        """
+        shutil.copytree(PROJECT_ROOT / "scripts", tmp_path / "scripts")
+        shutil.copyfile(COMPOSE_FILE, tmp_path / "docker-compose.yml")
+        shutil.copyfile(PROJECT_ROOT / ".env.example", tmp_path / ".env.example")
+        return tmp_path
+
+    @staticmethod
+    def _fake_docker(directory: Path, name: str = "docker.cmd") -> Path:
+        """A stub that answers the version probe and echoes every other call.
+
+        It starts nothing, so the readiness step always fails - which is the
+        honest outcome here and is asserted, rather than hidden by a stub that
+        pretends to be healthy. Every invocation is also appended to
+        ``calls.log`` beside it, together with the port variables Compose would
+        interpolate: "which subcommand ran" and "which port was passed down" are
+        not otherwise observable from outside the script.
+        """
+        directory.mkdir(parents=True, exist_ok=True)
+        stub = directory / name
+        if name.endswith(".cmd"):
+            stub.write_text(
+                "@echo off\r\n"
+                'echo %* ESAA_HTTP_PORT=%ESAA_HTTP_PORT% ESAA_API_PORT=%ESAA_API_PORT%>>"%~dp0calls.log"\r\n'
+                'if "%~1"=="compose" if "%~2"=="version" (\r\n'
+                "  echo Docker Compose version v2.29.7-fake\r\n"
+                "  exit /b 0\r\n"
+                ")\r\n"
+                "echo [fake docker] %*\r\n"
+                "exit /b 0\r\n",
+                encoding="utf-8",
+            )
+        else:
+            stub.write_text(
+                "#!/bin/sh\n"
+                'echo "$* ESAA_HTTP_PORT=$ESAA_HTTP_PORT ESAA_API_PORT=$ESAA_API_PORT"'
+                ' >> "$(dirname "$0")/calls.log"\n'
+                'if [ "$1" = compose ] && [ "$2" = version ]; then\n'
+                "  echo 'Docker Compose version v2.29.7-fake'\n"
+                "  exit 0\n"
+                "fi\n"
+                'echo "[fake docker] $*"\n'
+                "exit 0\n",
+                encoding="utf-8",
+                newline="\n",
+            )
+            stub.chmod(0o755)
+        return stub
+
+    @staticmethod
+    def _recorded_calls(directory: Path) -> str:
+        """Everything the fake Docker was asked to do, for assertions on behaviour."""
+        log = directory / "calls.log"
+        return log.read_text(encoding="utf-8", errors="replace") if log.is_file() else ""
+
+    @pytest.mark.parametrize("step", ["version", "compose", ".env", "health", "SPA", "demo"])
+    def test_the_scripts_cover_the_same_steps(self, ps1: str, sh: str, step: str) -> None:
+        for name, text in (("docker-up.ps1", ps1), ("docker-up.sh", sh)):
+            assert step.lower() in text.lower(), f"{name} never mentions {step!r}"
+
+    @pytest.mark.parametrize(
+        "marker",
+        [
+            "AUTH_SECRET_KEY",
+            "dev-only-insecure-change-me",
+            "/api/v1/health",
+            "docker compose",
+            "APP_ENV",
+        ],
+    )
+    def test_both_scripts_handle_the_configuration_edge_cases(
+        self, ps1: str, sh: str, marker: str
+    ) -> None:
+        for name, text in (("docker-up.ps1", ps1), ("docker-up.sh", sh)):
+            assert marker in text, f"{name} does not handle {marker!r}"
+
+    def test_the_scripts_are_documented(self) -> None:
+        for name in ("README.md", "PROJECT_HANDOFF.md"):
+            text = (PROJECT_ROOT / name).read_text(encoding="utf-8")
+            assert "docker-up" in text, f"{name} does not mention the launchers"
+
+    # -- PowerShell ---------------------------------------------------------
+
+    @pytest.fixture(scope="class")
+    def powershell(self) -> str:
+        for candidate in ("pwsh", "powershell"):
+            resolved = shutil.which(candidate)
+            if resolved is not None:
+                return resolved
+        pytest.skip("no PowerShell interpreter is available to run the launcher")
+
+    def _run_ps1(
+        self,
+        powershell: str,
+        arguments: list[str],
+        cwd: Path,
+        environment: dict[str, str],
+        timeout: int = 180,
+    ) -> subprocess.CompletedProcess[str]:
+        return subprocess.run(  # noqa: S603
+            [
+                powershell,
+                "-NoProfile",
+                "-NonInteractive",
+                "-ExecutionPolicy",
+                "Bypass",
+                "-File",
+                str(cwd / "scripts" / "docker-up.ps1"),
+                *arguments,
+            ],
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+            check=False,
+            cwd=str(cwd),
+            env=environment,
+        )
+
+    def test_the_powershell_script_parses(self, powershell: str) -> None:
+        """A syntax error in a launcher is discovered by the user, not by us.
+
+        The parser is part of the interpreter, so this needs no Docker.
+        """
+        escaped = str(UP_SCRIPT_PS1).replace("'", "''")
+        script = (
+            "$e=$null; "
+            "[void][System.Management.Automation.Language.Parser]::ParseFile("
+            f"'{escaped}', [ref]$null, [ref]$e); "
+            "if ($e.Count) { $e | ForEach-Object { $_.Message }; exit 1 }; exit 0"
+        )
+        completed = subprocess.run(  # noqa: S603
+            [powershell, "-NoProfile", "-NonInteractive", "-Command", script],
+            capture_output=True,
+            text=True,
+            timeout=120,
+            check=False,
+        )
+        assert completed.returncode == 0, completed.stdout + completed.stderr
+
+    def test_a_missing_docker_is_reported_rather_than_crashed_on(
+        self, powershell: str, fake_repo: Path
+    ) -> None:
+        """With no `docker` on PATH, it must say what to install and exit non-zero.
+
+        This is the first thing a reader without Docker sees, and the difference
+        between "install Docker Desktop" and a raw CommandNotFoundException.
+        """
+        empty = fake_repo / "emptybin"
+        empty.mkdir()
+
+        environment = dict(os.environ)
+        environment["PATH"] = str(empty)
+
+        completed = self._run_ps1(powershell, [], fake_repo, environment)
+        combined = completed.stdout + completed.stderr
+        assert completed.returncode != 0, "a missing docker was not reported"
+        assert "not on PATH" in combined, combined
+
+    def test_it_bootstraps_the_env_file_and_generates_a_signing_key(
+        self, powershell: str, fake_repo: Path
+    ) -> None:
+        """The `.env` step, run for real, against a fake Docker.
+
+        A `.env.example` with a placeholder key is present and no `.env` is; the
+        script must create one and replace the placeholder with a freshly
+        generated secret, then report the Compose version its probe returned. It
+        exits non-zero afterwards, because the fake Docker starts no API to answer
+        the readiness probe.
+        """
+        assert not (fake_repo / ".env").exists()
+
+        fake_bin = fake_repo / "fakebin"
+        self._fake_docker(fake_bin)
+
+        environment = dict(os.environ)
+        environment["PATH"] = str(fake_bin) + os.pathsep + environment.get("PATH", "")
+
+        completed = self._run_ps1(
+            powershell, ["-TimeoutSeconds", "1"], fake_repo, environment
+        )
+        combined = completed.stdout + completed.stderr
+
+        assert "Docker Compose version v2.29.7-fake" in combined, combined
+
+        env_file = fake_repo / ".env"
+        assert env_file.is_file(), f"the script never created .env:\n{combined}"
+        env_text = env_file.read_text(encoding="utf-8")
+
+        generated = re.search(r"(?m)^AUTH_SECRET_KEY\s*=\s*(\S+)\s*$", env_text)
+        assert generated, f"the script did not write AUTH_SECRET_KEY:\n{env_text[:400]}"
+        key = generated.group(1)
+        assert "dev-only-insecure-change-me" not in key
+        assert len(key) >= 32, f"the generated key is too short to sign with: {key!r}"
+        # Base64: URL-safe, and free of '$', which Compose would interpolate.
+        assert re.fullmatch(r"[A-Za-z0-9+/=]+", key), key
+        assert "$" not in key
+
+        # Everything else in the copied template must have survived verbatim.
+        assert "RETRIEVAL_RELATIVE_FLOOR=0.5" in env_text
+        assert "DEMO_USER_PASSWORD=Demo@12345" in env_text
+        assert "TRUSTED_PROXY_COUNT=0" in env_text
+
+        # The readiness probe cannot succeed without a real stack, so this is a
+        # failure - and it must be the *documented* failure, not a crash.
+        assert completed.returncode != 0
+        assert "did not become ready" in combined, combined
+
+    def test_it_does_not_overwrite_an_existing_secret(
+        self, powershell: str, fake_repo: Path
+    ) -> None:
+        """The other half of "generates one": an operator's key is left alone."""
+        existing = "Q" * 64
+        (fake_repo / ".env").write_text(
+            f"APP_ENV=development\nAUTH_SECRET_KEY={existing}\n", encoding="utf-8"
+        )
+
+        fake_bin = fake_repo / "fakebin"
+        self._fake_docker(fake_bin)
+        environment = dict(os.environ)
+        environment["PATH"] = str(fake_bin) + os.pathsep + environment.get("PATH", "")
+
+        completed = self._run_ps1(
+            powershell, ["-TimeoutSeconds", "1"], fake_repo, environment
+        )
+        combined = completed.stdout + completed.stderr
+        assert "already set" in combined, combined
+        assert existing in (fake_repo / ".env").read_text(encoding="utf-8")
+
+    def test_it_probes_the_port_configured_in_the_env_file(
+        self, powershell: str, fake_repo: Path
+    ) -> None:
+        """The port it waits on must be the port the stack publishes.
+
+        Compose loads `.env` automatically, so `ESAA_HTTP_PORT` set there is the
+        published port. A launcher that read the port only from its own
+        environment would report - and probe - `localhost:8080` while the stack
+        listened on 9090, i.e. it would time out on a stack that was working. The
+        fake Docker records the URL it is asked to fetch, because that is the only
+        observable evidence of which port was chosen.
+        """
+        (fake_repo / ".env").write_text(
+            "APP_ENV=development\n"
+            "AUTH_SECRET_KEY=" + "k" * 64 + "\n"
+            "ESAA_HTTP_PORT=9090\n"
+            "ESAA_API_PORT=9091\n",
+            encoding="utf-8",
+        )
+
+        fake_bin = fake_repo / "fakebin"
+        self._fake_docker(fake_bin)
+        environment = dict(os.environ)
+        environment["PATH"] = str(fake_bin) + os.pathsep + environment.get("PATH", "")
+
+        completed = self._run_ps1(
+            powershell, ["-TimeoutSeconds", "6"], fake_repo, environment
+        )
+        combined = completed.stdout + completed.stderr
+        calls = self._recorded_calls(fake_bin)
+
+        # The port from `.env` reaches the Compose invocation. That is what makes
+        # the published port and the port this script waits on the same one.
+        assert "ESAA_HTTP_PORT=9090" in calls, (
+            "the launcher did not pass the .env port to Compose:\n"
+            f"docker calls:\n{calls}\noutput:\n{combined}"
+        )
+        assert "ESAA_API_PORT=9091" in calls, calls
+        # And it reported that port, not the default.
+        assert "8080" not in combined, (
+            "the launcher reported the default port although .env sets another "
+            f"one:\n{combined}"
+        )
+
+    def test_it_refuses_to_start_a_production_stack(
+        self, powershell: str, fake_repo: Path
+    ) -> None:
+        """The demo launcher seeds simulated users, which production forbids.
+
+        Starting it anyway would fail deep inside the application; saying so up
+        front is the difference between a clear message and a confusing traceback.
+        """
+        (fake_repo / ".env").write_text(
+            "APP_ENV=production\nAUTH_SECRET_KEY=" + "x" * 64 + "\n", encoding="utf-8"
+        )
+
+        fake_bin = fake_repo / "fakebin"
+        self._fake_docker(fake_bin)
+        environment = dict(os.environ)
+        environment["PATH"] = str(fake_bin) + os.pathsep + environment.get("PATH", "")
+
+        completed = self._run_ps1(powershell, [], fake_repo, environment)
+        combined = completed.stdout + completed.stderr
+        assert completed.returncode != 0
+        assert "APP_ENV=production" in combined, combined
+        # Nothing was started.
+        assert "up --detach" not in combined, combined
+
+    def test_down_stops_the_stack_and_keeps_the_volume(
+        self, powershell: str, fake_repo: Path
+    ) -> None:
+        fake_bin = fake_repo / "fakebin"
+        self._fake_docker(fake_bin)
+        environment = dict(os.environ)
+        environment["PATH"] = str(fake_bin) + os.pathsep + environment.get("PATH", "")
+
+        completed = self._run_ps1(powershell, ["-Down"], fake_repo, environment)
+        combined = completed.stdout + completed.stderr
+        assert completed.returncode == 0, combined
+        assert "[fake docker] compose down" in combined
+        assert "data volume" in combined
+        # `-Down` must not build or start anything.
+        assert "up --detach" not in combined
+
+    # -- POSIX shell --------------------------------------------------------
+
+    @pytest.fixture(scope="class")
+    def shell(self) -> str:
+        resolved = shutil.which("sh")
+        if resolved is None:
+            pytest.skip("no POSIX shell is available to run docker-up.sh")
+        return resolved
+
+    def test_the_shell_script_parses(self, shell: str) -> None:
+        completed = subprocess.run(  # noqa: S603
+            [shell, "-n", str(UP_SCRIPT_SH)],
+            capture_output=True,
+            text=True,
+            timeout=60,
+            check=False,
+        )
+        assert completed.returncode == 0, completed.stdout + completed.stderr
+
+    def test_the_shell_script_is_recorded_as_executable_in_git(self) -> None:
+        """The mode bit, read from git rather than from the filesystem.
+
+        `git ls-files -s` is the only source of truth that survives a Windows
+        checkout: NTFS has no executable bit, so `stat()` here would say "not
+        executable" for a file that a Linux clone runs perfectly.
+        """
+        git = shutil.which("git")
+        if git is None:
+            pytest.skip("git is not installed in this environment")
+
+        completed = subprocess.run(  # noqa: S603
+            [git, "ls-files", "-s", "scripts/docker-up.sh"],
+            capture_output=True,
+            text=True,
+            timeout=60,
+            check=False,
+            cwd=str(PROJECT_ROOT),
+        )
+        assert completed.returncode == 0, completed.stderr
+        assert completed.stdout.startswith("100755"), (
+            "scripts/docker-up.sh is not recorded executable in git, so a Linux or "
+            "macOS clone cannot run `./scripts/docker-up.sh`: "
+            f"{completed.stdout.strip() or 'not tracked'}"
+        )
+        assert UP_SCRIPT_SH.read_text(encoding="utf-8").startswith("#!/usr/bin/env sh")
+
+    def test_an_unknown_option_is_rejected(self, shell: str, fake_repo: Path) -> None:
+        completed = subprocess.run(  # noqa: S603
+            [shell, str(fake_repo / "scripts" / "docker-up.sh"), "--not-an-option"],
+            capture_output=True,
+            text=True,
+            timeout=60,
+            check=False,
+            cwd=str(fake_repo),
+        )
+        assert completed.returncode == 2
+        assert "unknown option" in (completed.stdout + completed.stderr)
+
+    def test_help_exits_cleanly(self, shell: str, fake_repo: Path) -> None:
+        completed = subprocess.run(  # noqa: S603
+            [shell, str(fake_repo / "scripts" / "docker-up.sh"), "--help"],
+            capture_output=True,
+            text=True,
+            timeout=60,
+            check=False,
+            cwd=str(fake_repo),
+        )
+        assert completed.returncode == 0, completed.stdout + completed.stderr
+        assert "docker compose" in completed.stdout
+
+    def test_the_shell_script_bootstraps_the_env_file(
+        self, shell: str, fake_repo: Path
+    ) -> None:
+        """The same bootstrap as the PowerShell test, in the POSIX implementation.
+
+        A fake `docker` makes the prerequisites check pass; nothing answers the
+        readiness probe, so the script must time out and say so.
+        """
+        assert not (fake_repo / ".env").exists()
+
+        fake_bin = fake_repo / "fakebin"
+        self._fake_docker(fake_bin, name="docker")
+
+        environment = dict(os.environ)
+        environment["PATH"] = str(fake_bin) + os.pathsep + environment.get("PATH", "")
+
+        completed = subprocess.run(  # noqa: S603
+            [shell, str(fake_repo / "scripts" / "docker-up.sh"), "--timeout", "1"],
+            capture_output=True,
+            text=True,
+            timeout=300,
+            check=False,
+            cwd=str(fake_repo),
+            env=environment,
+        )
+        combined = completed.stdout + completed.stderr
+        assert "Docker Compose version v2.29.7-fake" in combined, combined
+
+        env_file = fake_repo / ".env"
+        assert env_file.is_file(), f"the script never created .env:\n{combined}"
+        env_text = env_file.read_text(encoding="utf-8")
+        generated = re.search(r"(?m)^AUTH_SECRET_KEY\s*=\s*(\S+)\s*$", env_text)
+        assert generated, f"the script did not write AUTH_SECRET_KEY:\n{env_text[:400]}"
+        key = generated.group(1)
+        assert "dev-only-insecure-change-me" not in key
+        assert len(key) >= 32, key
+        assert re.fullmatch(r"[0-9a-f]+", key), f"expected the portable hex secret: {key!r}"
+        assert "RETRIEVAL_RELATIVE_FLOOR=0.5" in env_text
+
+        assert completed.returncode != 0
+        assert "did not become ready" in combined, combined
+
+    def test_the_shell_script_uses_the_port_configured_in_the_env_file(
+        self, shell: str, fake_repo: Path
+    ) -> None:
+        """The POSIX half of the port contract, so the two cannot drift apart.
+
+        Compose loads `.env` automatically, so a port set there is the published
+        one; a launcher that only read its own environment would probe and report
+        the default while the stack listened elsewhere.
+        """
+        (fake_repo / ".env").write_text(
+            "APP_ENV=development\n"
+            "AUTH_SECRET_KEY=" + "k" * 64 + "\n"
+            "ESAA_HTTP_PORT=9090\n"
+            "ESAA_API_PORT=9091\n",
+            encoding="utf-8",
+        )
+
+        fake_bin = fake_repo / "fakebin"
+        self._fake_docker(fake_bin, name="docker")
+        environment = dict(os.environ)
+        environment["PATH"] = str(fake_bin) + os.pathsep + environment.get("PATH", "")
+
+        completed = subprocess.run(  # noqa: S603
+            [shell, str(fake_repo / "scripts" / "docker-up.sh"), "--timeout", "1"],
+            capture_output=True,
+            text=True,
+            timeout=300,
+            check=False,
+            cwd=str(fake_repo),
+            env=environment,
+        )
+        combined = completed.stdout + completed.stderr
+        calls = self._recorded_calls(fake_bin)
+
+        assert "ESAA_HTTP_PORT=9090" in calls, (
+            f"the launcher did not pass the .env port to Compose:\n{calls}\n{combined}"
+        )
+        assert "ESAA_API_PORT=9091" in calls, calls
+        assert "8080" not in combined, combined
 
 
 # ---------------------------------------------------------------------------

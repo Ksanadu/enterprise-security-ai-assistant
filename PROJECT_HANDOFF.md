@@ -19,6 +19,14 @@ break. Sections 11–12 are the maintenance playbook and a sign-off checklist.
 > actually wrong and where the fix lives. The running state of the project, round by round, is
 > `PROJECT_STATUS.md`. Where this document and the code disagree, the code wins - and then this
 > document gets fixed in the same commit, which is the rule it already asked for.
+>
+> **Amended after the one-command deployment change.** §9.1 and §9.2 previously required
+> `Copy-Item .env.example .env` before `docker compose up`, and presented the missing env file as
+> the reason the command could not be validated on a runner. That prerequisite was doing work the
+> compose file should have done itself: the `env_file` entry is now optional, the compose file
+> carries a working default for every value the stack needs, and `docker compose up --build` works
+> on a fresh clone with nothing else. The two launcher scripts and the tests that cover them are in
+> §3 and §5.5; `PROJECT_STATUS.md` records the round.
 
 ---
 
@@ -114,6 +122,8 @@ test suite and the demo, runs offline and deterministically. That is deliberate 
 │   ├── ARCHITECTURE.md        pipeline, authorization design, data model, threat model
 │   └── DEMO.md                how to run the demo + presenter script + acceptance traceability
 ├── scripts/
+│   ├── docker-up.ps1          ONE COMMAND: start the Docker stack, wait for readiness, report
+│   ├── docker-up.sh           the same six steps for Linux/macOS
 │   ├── run-local.ps1          start backend+frontend without Docker (the compose equivalent)
 │   ├── check.ps1              THE gate: ruff + mypy + pytest(--cov, floor 90) +
 │   │                          tsc + eslint + vitest(--coverage, thresholds) + secrets
@@ -756,11 +766,19 @@ state of the deployment *assets*, not a record of a working production system.
 
 ### 9.1 What exists
 
+`docker compose up --build` is a **one-command start from a fresh clone**, because the compose file
+carries a working default for everything the application needs, declares its `env_file` entry as
+optional (`required: false`, so a gitignored `.env` cannot stop the start) and lets the app generate
+its own signing key when none is supplied. `scripts/docker-up.ps1` (Windows) and
+`scripts/docker-up.sh` (Linux/macOS) wrap it to add the two things a bare `up` cannot: a *stable*
+`AUTH_SECRET_KEY` written into `.env`, and a readiness check that probes `/api/v1/health` **through
+nginx** before reporting success.
+
 `docker-compose.yml` defines two services:
 
 | Service | Image | Port binding | Notes |
 | --- | --- | --- | --- |
-| `backend` | `esaa-backend:local` | `127.0.0.1:${ESAA_API_PORT:-8000}:8000` | FastAPI/Uvicorn, health check |
+| `backend` | `esaa-backend:local` | `127.0.0.1:${ESAA_API_PORT:-8000}:8000` | FastAPI/Uvicorn, health check, `init: true` |
 | `frontend` | `esaa-frontend:local` | `${ESAA_HTTP_PORT:-8080}:80` | nginx serving the built SPA, proxying `/api` |
 
 The topology is **single-origin**: the browser talks only to nginx (port 8080 by default), and
@@ -772,12 +790,13 @@ Backend and frontend Dockerfiles are in `backend/Dockerfile` and `frontend/Docke
 
 ### 9.2 What you must do before it is deployable
 
-1. **Run `docker compose up` once.** Acceptance criterion §9.10 is unproven (§5.5). Nothing else
-   in this section matters until this works. Run `Copy-Item .env.example .env` first: the compose
-   file declares `env_file: - .env` for the backend, and Compose treats a missing env file as an
-   error, so without it the command fails before it starts building - which is also why the
-   deployment-asset test skips rather than fails on a machine that has no Docker, and why CI now
-   performs that copy before running the gate.
+1. **Run `docker compose up --build` once.** Acceptance criterion §9.10 is unproven (§5.5). Nothing
+   else in this section matters until this works. No `.env` is needed - the command works on a
+   fresh clone as it stands, and the missing file is no longer an error. (It used to be: the
+   compose file declared `env_file: - .env`, `.env` is gitignored, and Compose treats a missing
+   `env_file` as fatal, so the documented command could not have worked as written. That is also
+   why CI's deployment test both probes `docker compose version` first and materialises `.env`
+   from the template for the duration of its check.)
 2. **Set `AUTH_SECRET_KEY`** to a real random value. The example value is a placeholder.
 3. **Set `TRUSTED_PROXY_COUNT`** to the true number of proxies in front of the backend. It
    defaults to `0`, which is correct only if nothing proxies. Behind nginx, leaving it at `0`
@@ -991,8 +1010,11 @@ cheaply.
       escalation corpus. Done in the R1 commit.
 - [x] **BUG-2** (medium-risk reports that are never tracked) — fixed in the R4 commit.
 - [ ] **Run `docker compose up` on a machine with a container runtime** to move acceptance
-      criterion §9.10 from PARTIAL to verified. Rerun `verify-container-image.ps1` too. **This is
-      now the only unproven acceptance criterion.**
+      criterion §9.10 from PARTIAL to verified. **This is now the only unproven acceptance
+      criterion.** Start with `scripts/docker-up.ps1` (or `docker-up.sh`): it mints a stable
+      `AUTH_SECRET_KEY`, waits for the API to answer through nginx, and prints the demo logins, so
+      a failure reports which container stopped rather than leaving you to guess. Rerun
+      `verify-container-image.ps1` too.
 - [ ] Decide the LLM/embedding strategy for real use, and re-run the §5.4 corpora against it.
       (The provider request path is now covered by stub-transport tests; what is still unmeasured
       is answer *quality* against a real model.)

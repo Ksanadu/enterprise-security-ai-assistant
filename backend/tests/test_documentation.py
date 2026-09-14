@@ -45,6 +45,7 @@ PATH_SUFFIXES = (
     ".md",
     ".json",
     ".ps1",
+    ".sh",
     ".yml",
     ".yaml",
     ".conf",
@@ -100,11 +101,24 @@ class TestTheDefaultModeIsDisclosedUpFront:
 
 
 def _referenced_paths(text: str) -> set[str]:
-    """Backticked strings in the prose that name a file."""
+    """Backticked strings in the prose that name a file.
+
+    A backticked span is often a *command* rather than a bare path - ``pwsh -File
+    scripts/docker-up.ps1``. The file being named is the last token, so a leading
+    command with options is stripped; without that, the documentation's own
+    "run this" examples would be reported as references to a missing file, and the
+    honest fix would be to stop writing runnable commands in the documentation.
+    """
     candidates: set[str] = set()
-    # Strip the parts of a link that are not a path.
     for raw in re.findall(r"`([^`\n]+)`", text):
         candidate = raw.split("#", 1)[0].strip().rstrip("/")
+        # A shell/PowerShell invocation: keep the operand, drop the command.
+        invocation = re.match(
+            r"^(?:pwsh|powershell|sh|bash|python|python3|npm|npx|docker)\b.*?\s(\S+)$",
+            candidate,
+        )
+        if invocation:
+            candidate = invocation.group(1)
         if candidate in NOT_A_PATH or not candidate:
             continue
         if "/" not in candidate or not candidate.endswith(PATH_SUFFIXES):
