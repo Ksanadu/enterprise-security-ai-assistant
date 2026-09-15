@@ -24,6 +24,8 @@ env/
 .coverage
 htmlcov/
 coverage.xml
+# The gate's JUnit report: a build artefact that CI uploads, never source.
+gate-junit.xml
 
 # ---- Node / frontend ----
 node_modules/

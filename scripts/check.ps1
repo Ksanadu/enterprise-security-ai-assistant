@@ -43,7 +43,13 @@ if (-not (Test-Path $venvPython)) {
 
 Invoke-Step 'backend: ruff'      (Join-Path $root 'backend')  "& '$venvPython' -m ruff check app tests"
 Invoke-Step 'backend: mypy'      (Join-Path $root 'backend')  "& '$venvPython' -m mypy app"
-Invoke-Step 'backend: pytest'    (Join-Path $root 'backend')  "& '$venvPython' -m pytest -q --cov=app --cov-report=term-missing"
+# `--junit-xml` is written on failure as well as success, so a red run leaves a
+# machine-readable record of *which* test failed and why. That matters because a
+# runner's job log needs repository admin rights to read through the API: without
+# this, a CI-only failure is diagnosable only by guessing or by pushing debug
+# commits. The path is relative to the working directory above, so it lands in
+# backend/ and is uploaded as an artifact by .github/workflows/ci.yml.
+Invoke-Step 'backend: pytest'    (Join-Path $root 'backend')  "& '$venvPython' -m pytest -q --cov=app --cov-report=term-missing --junit-xml=gate-junit.xml"
 Invoke-Step 'frontend: typecheck' (Join-Path $root 'frontend') 'npx tsc -b'
 Invoke-Step 'frontend: eslint'   (Join-Path $root 'frontend') 'npm run lint'
 Invoke-Step 'frontend: vitest'   (Join-Path $root 'frontend') 'npm run test:coverage'

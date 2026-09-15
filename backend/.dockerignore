@@ -34,6 +34,7 @@ __pycache__/
 .ruff_cache/
 .coverage
 coverage.xml
+gate-junit.xml
 htmlcov/
 evaluation.db
 

@@ -69,22 +69,19 @@ jobs:
 
       - name: Run the gate
         shell: pwsh
-        run: |
-          # Tee so a failure still leaves the full output behind, and preserve the
-          # gate's own exit code so a failure is still a failure.
-          ./scripts/check.ps1 2>&1 | Tee-Object -FilePath gate-output.txt
-          exit $LASTEXITCODE
+        run: ./scripts/check.ps1
 
-      # A red run must be diagnosable. Job logs need repository admin rights to
-      # read through the API, and the `::error::` annotations name only *which*
-      # gate failed. R11 produced a red run whose cause - a deployment test that
-      # can only run where a Docker CLI exists, i.e. here and nowhere else - took
-      # an hour to infer from the outside rather than one look at the output.
-      # This artifact is the fix for that, not a convenience.
-      - name: Upload the gate output
+      # `check.ps1` writes a JUnit report (backend/gate-junit.xml) on failure as
+      # well as success. Upload it: a runner's job log needs repository admin
+      # rights to read through the API, and the `::error::` annotations name only
+      # *which* gate failed. R11 produced a red run whose cause - a deployment test
+      # that can only run where a Docker CLI exists, i.e. on the runner and nowhere
+      # else - took an hour to infer from the outside. This is the fix for that
+      # class of problem, not a convenience.
+      - name: Upload the test report
         if: failure()
         uses: actions/upload-artifact@v4
         with:
-          name: gate-output
-          path: gate-output.txt
-          if-no-files-found: ignore
+          name: gate-junit
+          path: backend/gate-junit.xml
+          if-no-files-found: warn
