@@ -563,6 +563,13 @@ class TestComposeSemantics:
 
         shutil.copyfile(COMPOSE_FILE, tmp_path / "docker-compose.yml")
         assert not (tmp_path / ".env").exists()
+        # The build contexts are created empty. `docker compose config` resolves and
+        # checks them, and this test is about the env-file contract: leaving them
+        # out would make it fail for a reason that has nothing to do with what it
+        # asserts - and only on a machine that has a Docker CLI, which is not the
+        # machine it was written on.
+        (tmp_path / "backend").mkdir()
+        (tmp_path / "frontend").mkdir()
 
         environment = {
             key: value for key, value in os.environ.items() if not key.startswith("ESAA_")
@@ -614,6 +621,59 @@ class TestTheStackStartsWithNoConfigurationFile:
     @pytest.fixture(scope="class")
     def environment(self, services: dict[str, Any]) -> dict[str, str]:
         return services["backend"]["environment"]
+
+    @staticmethod
+    def _interpolate(value: str, overrides: dict[str, str] | None = None) -> str:
+        """Resolve Compose-style ``${NAME}`` / ``${NAME:-default}``, innermost first.
+
+        A value in the compose file is a *Compose template*, not the string the
+        application receives: Compose interpolates it before the container starts.
+        Asserting on the raw text would test the template; resolving it lets the
+        assertion be about the configuration the application actually gets.
+        """
+        overrides = overrides or {}
+        pattern = re.compile(r"\$\{([A-Z_][A-Z0-9_]*)(?::-([^{}]*))?\}")
+        resolved = value
+        for _ in range(10):
+            if "${" not in resolved:
+                break
+            resolved = pattern.sub(
+                lambda match: overrides.get(
+                    match.group(1), match.group(2) if match.group(2) is not None else ""
+                ),
+                resolved,
+            )
+        return resolved
+
+    def test_the_resolved_configuration_is_one_the_application_accepts(
+        self, environment: dict[str, str]
+    ) -> None:
+        """The compose defaults, interpolated as Compose would, must be valid settings.
+
+        Handing the raw `${...}` template to `Settings` is not the test - Compose
+        resolves it first. What matters is that the value the app is handed passes
+        its own validation, on the default ports and on an overridden one; a
+        template that interpolated to an empty or malformed list would take the
+        whole stack down on first start.
+        """
+        from app.core.config import Settings
+
+        for overrides in ({}, {"ESAA_HTTP_PORT": "9090", "ESAA_API_PORT": "9091"}):
+            origins = self._interpolate(environment["API_CORS_ORIGINS"], overrides)
+            assert "${" not in origins, f"unresolved interpolation left in {origins!r}"
+            assert origins, "the CORS origin resolved to nothing"
+            assert "*" not in origins
+            for origin in origins.split(","):
+                assert origin.startswith(("http://localhost", "http://127.0.0.1")), origin
+                assert origin.rstrip("/").split(":")[-1].isdigit(), origin
+
+            shipped = Settings(
+                _env_file=None,
+                app_env="development",
+                api_cors_origins=origins,
+                trusted_proxy_count=int(environment["TRUSTED_PROXY_COUNT"]),
+            )
+            assert shipped.api_cors_origins, origins
 
     def test_configuration_comes_from_the_environment_not_the_image(
         self, environment: dict[str, str]
@@ -830,6 +890,19 @@ class TestOneCommandLauncher:
     ) -> None:
         for name, text in (("docker-up.ps1", ps1), ("docker-up.sh", sh)):
             assert marker in text, f"{name} does not handle {marker!r}"
+
+    def test_neither_script_sends_the_readiness_probe_through_a_proxy(
+        self, ps1: str, sh: str
+    ) -> None:
+        """A loopback probe through a corporate proxy always fails.
+
+        On a machine with `HTTP_PROXY` set, asking the proxy for
+        `http://127.0.0.1:8080/...` answers 403 or 502, so a perfectly healthy
+        stack would be reported as never becoming ready - and the reader would be
+        told to raise a timeout that was never the problem.
+        """
+        assert "-NoProxy" in ps1, "the PowerShell probe does not bypass the proxy"
+        assert "--noproxy" in sh or "--no-proxy" in sh, "the shell probe does not bypass the proxy"
 
     def test_the_scripts_are_documented(self) -> None:
         for name in ("README.md", "PROJECT_HANDOFF.md"):

@@ -94,12 +94,18 @@ fail() {
 
 # A portable "is this http URL answering with 200" check. curl is not guaranteed
 # everywhere either, so wget is the fallback.
+#
+# The proxy variables are cleared for the request: on a machine with HTTP_PROXY
+# set, asking a proxy to fetch http://127.0.0.1 answers 403/502, and a perfectly
+# healthy stack would be reported as never becoming ready.
 probe() {
     url=$1
     if command -v curl >/dev/null 2>&1; then
-        curl -fsS -o /dev/null --max-time 5 "$url" 2>/dev/null
+        HTTP_PROXY= HTTPS_PROXY= ALL_PROXY= http_proxy= https_proxy= all_proxy= \
+            curl -fsS -o /dev/null --max-time 5 --noproxy '*' "$url" 2>/dev/null
     elif command -v wget >/dev/null 2>&1; then
-        wget -q -O /dev/null --timeout=5 --tries=1 "$url" 2>/dev/null
+        HTTP_PROXY= HTTPS_PROXY= http_proxy= https_proxy= \
+            wget -q -O /dev/null --timeout=5 --tries=1 --no-proxy "$url" 2>/dev/null
     else
         return 2
     fi

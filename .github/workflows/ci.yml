@@ -69,4 +69,22 @@ jobs:
 
       - name: Run the gate
         shell: pwsh
-        run: ./scripts/check.ps1
+        run: |
+          # Tee so a failure still leaves the full output behind, and preserve the
+          # gate's own exit code so a failure is still a failure.
+          ./scripts/check.ps1 2>&1 | Tee-Object -FilePath gate-output.txt
+          exit $LASTEXITCODE
+
+      # A red run must be diagnosable. Job logs need repository admin rights to
+      # read through the API, and the `::error::` annotations name only *which*
+      # gate failed. R11 produced a red run whose cause - a deployment test that
+      # can only run where a Docker CLI exists, i.e. here and nowhere else - took
+      # an hour to infer from the outside rather than one look at the output.
+      # This artifact is the fix for that, not a convenience.
+      - name: Upload the gate output
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: gate-output
+          path: gate-output.txt
+          if-no-files-found: ignore

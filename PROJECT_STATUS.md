@@ -455,10 +455,34 @@ guaranteed the command could never have worked on a fresh clone, and that is fix
       store landed **under the mount point** rather than inside the image. That is still not
       `docker compose up`, but it is proof that the image's contents and entrypoint work.
 
-**Round 11 measured:** backend 1590 collected (1583 passed, 7 skipped), 1214 security-marked
+**Round 11 measured:** backend 1592 collected (1585 passed, 7 skipped), 1216 security-marked
 (was 1182), coverage floor 90 enforced; frontend 62 passed with thresholds met. Of the skips, 1 is
 the Docker CLI and 5 are the POSIX shell, so `docker compose up` itself remains unproven by
 execution and is reported that way in every document that mentions it.
+
+**Round 11's own CI incident — the tests that only fail where a Docker CLI exists.**
+
+R11's first push went red on `3d629cc`, in the pytest gate, and the cause was R11's own tests.
+`test_compose_config_is_valid_with_no_env_file_at_all` copies only `docker-compose.yml` into an
+empty directory and runs `docker compose config` there. It **skipped here** (no Docker CLI) and
+**ran on the runner** (Docker is installed), where it failed because the file's `build.context`
+directories do not exist in that empty directory. A test written to prove something about the
+`env_file` contract was failing over something unrelated to it, on the one machine that can run it.
+
+Two things came out of that, and the second matters more than the first:
+
+1. The test now creates the two build contexts as empty directories, so it tests the env-file
+   contract and nothing else. The same review found a second test of the same shape - a
+   hand-written `${...}` template fed straight into `Settings`, which is not the string the
+   application ever receives - and it now interpolates the value first, so it asserts something
+   real (that the resolved origins are valid settings on the default *and* an overridden port).
+2. **A red run was not diagnosable from the outside.** Job logs need repository admin rights, and
+   the `::error::` annotation named only the gate (`backend: pytest`). The cause took an hour of
+   inference. The workflow now tees the gate output and uploads it as an artifact on failure, which
+   is the fix for the class of problem - not a convenience. This is the third time in this project
+   that the expensive lesson has been the same one: a check that cannot run in the environment it
+   was written in is a check that has never been verified (the coverage `omit`, the `mock` provider,
+   the unrun Docker path, and now this).
 
 ## What remains
 
@@ -499,11 +523,11 @@ every round, in the same commit as the change it describes.
 | Gate | Result |
 | --- | --- |
 | `scripts/check.ps1` (ruff, mypy, pytest+cov, tsc, eslint, vitest+cov, secret scan) | **exit 0** |
-| Backend `pytest -q` | **1583 passed, 7 skipped** of **1590 collected** (was 1558; R11 added 32 deployment/launcher tests, and the 6 extra skips are its tool-dependent ones) |
+| Backend `pytest -q` | **1585 passed, 7 skipped** of **1592 collected** (was 1558; R11 added 34 deployment/launcher tests, and the 6 extra skips are its tool-dependent ones) |
 | Backend coverage `--cov=app` | **95%** (4308 statements, 215 missed), floor 90 enforced; `app/main.py` measured (93%); `app/ai/llm.py` 84% → 98% |
 | Frontend `npm test` | **62 passed** (2 files) |
 | Frontend coverage | **91.39% statements / 80.6% branches / 74.44% functions**, thresholds 85 / 75 / 70 enforced |
-| `security`-marked tests | **1214** of 1590 collected (was 1182 of 1558 before R11) |
+| `security`-marked tests | **1216** of 1592 collected (was 1182 of 1558 before R11) |
 | CI | `.github/workflows/ci.yml` runs the whole gate on push to `main` and on pull requests. Green on every round since the workflow was fixed: `c1c63a4` (R7), `fb8accc` (R8), `bc4d09a` (R9), `c944644` (R10), `2cd3f4a`, plus `c3da181` and `7e74377` before them |
 | `backend/scripts/demo.py` | **71 / 71 checks passed** (was 67; SCENARIO 0 now demonstrates the disclosure boundary and the search limiter) |
 | Disclosure boundary (live) | anonymous `/meta` carries no AI-stack key and no `demo_users_seeded`; anonymous `/chat/capabilities` is 401; rule counts absent for employee, present for security |

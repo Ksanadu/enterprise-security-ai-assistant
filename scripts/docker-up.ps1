@@ -293,9 +293,14 @@ try {
     while ((Get-Date) -lt $deadline) {
         # Ask the *frontend* origin, because that is the path the browser takes:
         # it proves nginx is up, the SPA is served, and /api reaches the backend.
+        #
+        # `-NoProxy` matters on a machine with HTTP_PROXY set: without it the
+        # request for 127.0.0.1 is sent to the corporate proxy, which cannot reach
+        # this stack, and a perfectly healthy deployment is reported as never
+        # becoming ready.
         try {
             $probe = Invoke-WebRequest -Uri "http://127.0.0.1:$httpPort/api/v1/health" `
-                -UseBasicParsing -TimeoutSec 5
+                -UseBasicParsing -TimeoutSec 5 -NoProxy
             if ($probe.StatusCode -eq 200) {
                 $ready = $true
                 break
@@ -348,7 +353,7 @@ try {
     Write-Step 'Checking the application actually loads'
 
     try {
-        $page = Invoke-WebRequest -Uri "http://127.0.0.1:$httpPort/" -UseBasicParsing -TimeoutSec 10
+        $page = Invoke-WebRequest -Uri "http://127.0.0.1:$httpPort/" -UseBasicParsing -TimeoutSec 10 -NoProxy
         if ($page.StatusCode -eq 200 -and $page.Content -match '<div id="root"') {
             Write-Ok 'the SPA document is served'
         }
