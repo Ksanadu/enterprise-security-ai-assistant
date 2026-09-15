@@ -245,8 +245,14 @@ ready=0
 last_reason='no probe has run yet'
 
 while [ "$elapsed" -lt "$TIMEOUT" ]; do
-    probe "http://127.0.0.1:$HTTP_PORT/api/v1/health"
-    status=$?
+    # `|| status=$?` rather than `set -e` reasoning: the probe *is* expected to
+    # fail while the stack starts, and a function invoked in a `while` condition
+    # is not exempt from `set -e` the way an `if` condition is on every shell.
+    # Without this the script exits with curl's code (7, "couldn't connect")
+    # instead of reaching its own message - which is exactly the confusing
+    # failure the message exists to prevent.
+    status=0
+    probe "http://127.0.0.1:$HTTP_PORT/api/v1/health" || status=$?
 
     if [ "$status" -eq 0 ]; then
         ready=1

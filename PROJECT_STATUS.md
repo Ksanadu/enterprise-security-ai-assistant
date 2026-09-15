@@ -460,29 +460,53 @@ guaranteed the command could never have worked on a fresh clone, and that is fix
 the Docker CLI and 5 are the POSIX shell, so `docker compose up` itself remains unproven by
 execution and is reported that way in every document that mentions it.
 
-**Round 11's own CI incident — the tests that only fail where a Docker CLI exists.**
+**Round 11's own CI incident — three red runs, and what each one was worth.**
 
-R11's first push went red on `3d629cc`, in the pytest gate, and the cause was R11's own tests.
-`test_compose_config_is_valid_with_no_env_file_at_all` copies only `docker-compose.yml` into an
-empty directory and runs `docker compose config` there. It **skipped here** (no Docker CLI) and
-**ran on the runner** (Docker is installed), where it failed because the file's `build.context`
-directories do not exist in that empty directory. A test written to prove something about the
-`env_file` contract was failing over something unrelated to it, on the one machine that can run it.
+The first push went red on `3d629cc`: `test_compose_config_is_valid_with_no_env_file_at_all` copies
+only `docker-compose.yml` into an empty directory and runs `docker compose config` there. It
+**skipped here** (no Docker CLI) and **ran on the runner** (Docker is installed), where it failed
+because the file's `build.context` directories do not exist in that empty directory. A test written
+to prove something about the `env_file` contract was failing over something unrelated to it, on the
+one machine able to run it. It now creates both contexts as empty directories.
 
-Two things came out of that, and the second matters more than the first:
+The same review found a second test of the same shape: a hand-written `${...}` template fed straight
+into `Settings`, which is not the string the application ever receives - Compose interpolates it
+first. It now interpolates with Compose's own `${VAR:-default}` semantics and asserts the resolved
+origins are valid settings on the default ports *and* on an overridden one.
 
-1. The test now creates the two build contexts as empty directories, so it tests the env-file
-   contract and nothing else. The same review found a second test of the same shape - a
-   hand-written `${...}` template fed straight into `Settings`, which is not the string the
-   application ever receives - and it now interpolates the value first, so it asserts something
-   real (that the resolved origins are valid settings on the default *and* an overridden port).
-2. **A red run was not diagnosable from the outside.** Job logs need repository admin rights, and
-   the `::error::` annotation named only the gate (`backend: pytest`). The cause took an hour of
-   inference. The workflow now tees the gate output and uploads it as an artifact on failure, which
-   is the fix for the class of problem - not a convenience. This is the third time in this project
-   that the expensive lesson has been the same one: a check that cannot run in the environment it
-   was written in is a check that has never been verified (the coverage `omit`, the `mock` provider,
-   the unrun Docker path, and now this).
+**A red run was not diagnosable from the outside, and that cost more than the defect.** A job's log
+needs repository admin rights to read through the API; the `::error::` annotation named only the
+gate (`backend: pytest`). Two red runs were diagnosed by inference. Three changes fixed the class of
+problem rather than the instance:
+
+1. `check.ps1` passes `--junit-xml=gate-junit.xml` to pytest, written on failure as well as success,
+   and the workflow uploads it as an artifact.
+2. Artifacts also need admin rights to download, so `check.ps1` now **parses that report and emits
+   one annotation per failing test**, carrying the test id and the first line of the JUnit `message`
+   attribute - the assertion itself. Annotations are readable without a token. That is how the third
+   failure was identified in one API call instead of another hour of guessing.
+3. Both were verified by **forcing a failure through the gate**, because a fail-path helper that has
+   only ever run on the success path is untested code. That check found two bugs in the helper
+   itself (`XmlElement + XmlElement` has no `+` in PowerShell; splitting an element rather than its
+   text yields the type name) - either would have failed silently in the one place that matters.
+
+The third red run (`9d64991`) was a genuine product bug, found by R11's own test and only on Linux:
+`docker-up.sh` calls `probe` in the `while` condition, and with `set -e` the probe's failure -
+which is *expected* while the stack starts - terminated the script with curl's exit code 7 instead
+of reaching its own "did not become ready" message. The assertion that caught it was the one
+asserting the message, which is why it existed. Fixed with `probe ... || status=$?`.
+
+Two things worth carrying forward:
+
+- **That test can be run on Windows after all.** `sh` ships with Git for Windows; it is simply not
+  on `PATH`. With `C:\Program Files\Git\bin` prepended, all five shell-launcher tests execute here
+  instead of skipping - so the suite that only runs on Linux can be exercised locally.
+  `powershell -Command "$env:PATH='C:\Program Files\Git\bin;' + $env:PATH; cd backend; .\.venv\Scripts\python.exe -m pytest tests/test_deployment_assets.py -q"`
+- The expensive lesson has now repeated four times in this project, in four costumes (the coverage
+  `omit`, the `mock` provider, the unrun Docker path, and this): **a check that cannot run in the
+  environment it was written in is a check that has never been verified.** The corollary this round
+  added: when such a check does finally run and fails, the failure must be *readable*, or the cost
+  of the discovery is paid again in diagnosis.
 
 ## What remains
 

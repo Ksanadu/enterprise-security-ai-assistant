@@ -1244,13 +1244,25 @@ class TestOneCommandLauncher:
         generated = re.search(r"(?m)^AUTH_SECRET_KEY\s*=\s*(\S+)\s*$", env_text)
         assert generated, f"the script did not write AUTH_SECRET_KEY:\n{env_text[:400]}"
         key = generated.group(1)
-        assert "dev-only-insecure-change-me" not in key
-        assert len(key) >= 32, key
-        assert re.fullmatch(r"[0-9a-f]+", key), f"expected the portable hex secret: {key!r}"
-        assert "RETRIEVAL_RELATIVE_FLOOR=0.5" in env_text
+        # Every assertion below carries `combined`: this test is the one that can
+        # only run where a POSIX shell exists, so it is also the one whose failures
+        # are hardest to read - a bare assert reaches the CI annotation as
+        # "AssertionError:" with nothing after it.
+        assert "dev-only-insecure-change-me" not in key, combined
+        assert len(key) >= 32, f"key too short to sign with: {key!r}\n{combined}"
+        assert re.fullmatch(r"[0-9a-f]+", key), (
+            f"expected the portable hex secret, got {key!r}\n{combined}"
+        )
+        assert "RETRIEVAL_RELATIVE_FLOOR=0.5" in env_text, env_text[:400]
 
-        assert completed.returncode != 0
-        assert "did not become ready" in combined, combined
+        assert completed.returncode != 0, combined
+        # `set -e` in the script must not fire on a probe that is *expected* to
+        # fail while the stack starts. When it did, the script exited with curl's
+        # code 7 and this message never appeared - the failure this test caught.
+        assert "did not become ready" in combined, (
+            "the script did not reach its own timeout message; it exited "
+            f"{completed.returncode} instead\n{combined}"
+        )
 
     def test_the_shell_script_uses_the_port_configured_in_the_env_file(
         self, shell: str, fake_repo: Path
