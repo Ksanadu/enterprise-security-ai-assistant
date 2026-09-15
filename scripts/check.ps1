@@ -63,13 +63,55 @@ foreach ($name in $ran) {
 
 if ($failed.Count -gt 0) {
     Write-Host ('FAILED: ' + ($failed -join ', ')) -ForegroundColor Red
+
     # In CI, name the failing gate as an annotation. Without this, a red run says
     # only "Process completed with exit code 1", which is exactly as useful as no
     # pipeline at all - the annotations are also readable from the commit page and
     # from the Checks API without downloading a log.
     if ($env:GITHUB_ACTIONS -eq 'true') {
         foreach ($name in $failed) {
-            Write-Host "::error title=gate failed::$name failed; open the 'Run the gate' step for its output"
+            Write-Host "::error title=gate failed::$name failed"
+        }
+
+        # Naming the gate is not enough. A job's log and its artifacts both need
+        # repository admin rights to read through the API, so "backend: pytest
+        # failed" is the whole story an outside observer can get - and R11 spent an
+        # hour inferring a cause that one line of JUnit could have stated. The
+        # report is parsed here and the failing tests are emitted as annotations,
+        # which *are* readable without a token.
+        $report = Join-Path $root 'backend\gate-junit.xml'
+        if ($failed -contains 'backend: pytest' -and (Test-Path $report)) {
+            [xml]$junit = Get-Content -Raw -LiteralPath $report
+            $reported = 0
+            foreach ($case in $junit.testsuites.testsuite.testcase) {
+                # Interpolated, not added: XmlElement has no `+` operator.
+                $problem = "$($case.failure)$($case.error)"
+                if ([string]::IsNullOrWhiteSpace($problem)) { continue }
+                if ($reported -ge 8) {
+                    Write-Host '::error title=further failures::more tests failed; see backend/gate-junit.xml'
+                    break
+                }
+                # A multi-line message collapses to its first line: an annotation
+                # is a single line, and the first line of a JUnit `message`
+                # attribute is the assertion itself ("AssertionError: ..."). The
+                # element's text is a fallback for a report that carries no
+                # message; splitting the element itself yields only its type name.
+                $detail = "$($case.failure.message)$($case.error.message)"
+                if ([string]::IsNullOrWhiteSpace($detail)) {
+                    $detail = "$($case.failure.'#text')$($case.error.'#text')"
+                }
+                $first = (($detail -split "`n") | Where-Object { $_.Trim() } | Select-Object -First 1)
+                $where = if ($case.classname) { "$($case.classname)::$($case.name)" } else { $case.name }
+                # Built as a variable, not formatted inline: a bare `::` inside a
+                # nested quoted expression is where PowerShell 5.1's parser gives
+                # up, and the failure is a confusing "missing expression".
+                $annotation = '::error title=test failed::{0} :: {1}' -f $where, $first.Trim()
+                Write-Host $annotation
+                $reported++
+            }
+            if ($reported -eq 0) {
+                Write-Host '::error title=no test report::pytest failed but gate-junit.xml records no failing case'
+            }
         }
     }
     exit 1

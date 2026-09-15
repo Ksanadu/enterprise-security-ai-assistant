@@ -386,9 +386,9 @@ field nobody reads is not an answer.
   dashboard, triage it, and check the audit trail - all through HTTP.
 * **Cross-role consistency**: the same question asked by all three roles must produce an
   identical classification and identical escalation, while retrieval differs and stays in scope.
-* **1214 security-marked tests** covering RBAC, injection, leakage, session handling, ticket
+* **1216 security-marked tests** covering RBAC, injection, leakage, session handling, ticket
   scoping, redaction and the deployment assets, runnable as one suite with `pytest -m security`.
-* 1590 backend tests, **95% statement coverage** (the coverage floor is enforced by the gate);
+* 1592 backend tests, **95% statement coverage** (the coverage floor is enforced by the gate);
   `ruff`, `mypy`, `tsc` and `eslint` clean. The phase this section describes closed with a smaller
   suite; the figure above is the current one, and the four places in this README that state it are
   asserted to agree by `tests/test_documentation.py`.
@@ -555,7 +555,7 @@ stale cached index). A mismatch is logged as a security event and the chunk is d
 │   ├── scripts/
 │   │   ├── demo.py               # the executable demonstration (71 checks)
 │   │   └── update_evaluation_expectations.py
-│   ├── tests/                    # 1590 tests
+│   ├── tests/                    # 1592 tests
 │   └── requirements*.txt
 ├── frontend/
 │   ├── Dockerfile                # Vite build stage → nginx runtime stage
@@ -959,12 +959,12 @@ The suite has three layers:
 
 | Layer | What it covers | How to run |
 | ----- | -------------- | ---------- |
-| Unit and integration (1590 tests) | Every module: config guards, ORM, RAG, classifiers, services, API, deployment assets | `pytest -q` |
+| Unit and integration (1592 tests) | Every module: config guards, ORM, RAG, classifiers, services, API, deployment assets | `pytest -q` |
 | Security (1067 tests) | RBAC, injection, leakage, sessions, ticket scoping, redaction, deployment hardening | `pytest -m security` |
 | Evaluation (61 tests) | The 40-question set and the end-to-end demo walkthrough | `pytest -m evaluation` |
 
 ```powershell
-# backend: 1590 tests, 95% statement coverage (floor 90)
+# backend: 1592 tests, 95% statement coverage (floor 90)
 cd backend
 .\.venv\Scripts\python.exe -m pytest -q
 .\.venv\Scripts\python.exe -m pytest -m security -q          # security subset
