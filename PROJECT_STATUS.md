@@ -552,7 +552,7 @@ every round, in the same commit as the change it describes.
 | Frontend `npm test` | **62 passed** (2 files) |
 | Frontend coverage | **91.39% statements / 80.6% branches / 74.44% functions**, thresholds 85 / 75 / 70 enforced |
 | `security`-marked tests | **1216** of 1592 collected (was 1182 of 1558 before R11) |
-| CI | `.github/workflows/ci.yml` runs the whole gate on push to `main` and on pull requests. Green on every round since the workflow was fixed: `c1c63a4` (R7), `fb8accc` (R8), `bc4d09a` (R9), `c944644` (R10), `2cd3f4a`, plus `c3da181` and `7e74377` before them |
+| CI | `.github/workflows/ci.yml` runs the whole gate on push to `main` and on pull requests. Green on every round since the workflow was fixed: `c1c63a4` (R7), `fb8accc` (R8), `bc4d09a` (R9), `c944644` (R10), `2cd3f4a`, plus `c3da181` and `7e74377` before them. **R11 took four pushes to reach green** (`3d629cc`, `c1ef7c5` and `9d64991` were red; `87b7f40` is green) - three of those red runs were this round's own defects, and the record of what each one was is below |
 | `backend/scripts/demo.py` | **71 / 71 checks passed** (was 67; SCENARIO 0 now demonstrates the disclosure boundary and the search limiter) |
 | Disclosure boundary (live) | anonymous `/meta` carries no AI-stack key and no `demo_users_seeded`; anonymous `/chat/capabilities` is 401; rule counts absent for employee, present for security |
 | `/knowledge/search` throttle (live) | 30 rapid searches → 20 × 200, then 429 from request 21 (same budget as chat, separate key) |
@@ -595,11 +595,15 @@ cannot do.
 
 ## Last Verified
 
-2026-09-13 — stabilization rounds R7–R10, all green locally and on the runner. R11 (the
-one-command Docker path) is verified locally against the same gate; `docker compose up` itself
-remains unexecuted here for want of a container runtime.
-(`scripts/check.ps1` exit 0; backend 1583 passed / 7 skipped / 95% with the floor enforced;
+2026-09-13 — stabilization rounds R7–R10. R11 (the one-command Docker path) is verified locally
+against the same gate **and on the runner — CI is green on `87b7f40`** after three red runs, each of
+which was this round's own defect and is recorded above. `docker compose up` itself remains
+unexecuted here for want of a container runtime, so acceptance criterion §9.10 is still unproven by
+execution.
+(`scripts/check.ps1` exit 0; backend 1585 passed / 7 skipped / 95% with the floor enforced;
 frontend 62 passed with thresholds met; demo 71/71; evaluation set 40/40 with 28/28 expected
-documents; CI green on `c1c63a4`, `fb8accc`, `bc4d09a`, `c944644`.)
-Local environment: Windows PowerShell 5.1, Python 3.12.10, Node 24.19.0, no Docker.
+documents; `scripts/verify-container-image.ps1` IMAGE CHECK PASSED; CI green on `87b7f40`.)
+Local environment: Windows PowerShell 5.1, Python 3.12.10, Node 24.19.0, no Docker. Git for Windows
+provides `sh`, so the five shell-launcher tests run here too when `C:\Program Files\Git\bin` is on
+`PATH`; without it they skip.
 (`pwsh` is not installed on this machine; use `powershell -ExecutionPolicy Bypass -File scripts\check.ps1`.)
